@@ -101,13 +101,13 @@ impl VideoSettings {
 }
 
 fn varint(mut v: u64, out: &mut Vec<u8>) { while v >= 128 { out.push((v as u8 & 127) | 128); v >>= 7; } out.push(v as u8); }
-fn put_varint(field: u64, v: u64, out: &mut Vec<u8>) { varint(field << 3, out); varint(v, out); }
-fn put_bytes(field: u64, v: &[u8], out: &mut Vec<u8>) { varint(field << 3 | 2, out); varint(v.len() as u64, out); out.extend_from_slice(v); }
+pub(crate) fn put_varint(field: u64, v: u64, out: &mut Vec<u8>) { varint(field << 3, out); varint(v, out); }
+pub(crate) fn put_bytes(field: u64, v: &[u8], out: &mut Vec<u8>) { varint(field << 3 | 2, out); varint(v.len() as u64, out); out.extend_from_slice(v); }
 
-fn number(fields: &[WireField], n: u32) -> Option<u64> {
+pub(crate) fn number(fields: &[WireField], n: u32) -> Option<u64> {
     fields.iter().find_map(|f| match (f.number, &f.value) { (x, WireValue::Varint(v)) if x == n => Some(*v), _ => None })
 }
-fn message<'a>(fields: &[WireField<'a>], n: u32) -> Option<&'a [u8]> {
+pub(crate) fn message<'a>(fields: &[WireField<'a>], n: u32) -> Option<&'a [u8]> {
     fields.iter().find_map(|f| match (f.number, &f.value) { (x, WireValue::Bytes(b)) if x == n => Some(*b), _ => None })
 }
 
@@ -260,17 +260,20 @@ pub fn rejected_request(data:&[u8],reason:&str)->Option<Vec<u8>> {
 /// Message 7 ScreenSources in pixels for capture-setting v4: native, choices, current size.
 pub fn screen_sources(seq: u64, timestamp: u64, native: (u32, u32), output: Option<(u32, u32)>, name: &str) -> Result<Vec<u8>, String> {
     use crate::initialization::{Screen, WinRect};
-    let outputs=crate::wayland::outputs();
-    if !outputs.is_empty() {
+    let screens_list=crate::wayland::screens();
+    if !screens_list.is_empty() {
         let current=crate::wayland::selected();
-        let choices:Vec<Vec<(i32,i32)>>=outputs.iter().map(|m|scaled_sizes((m.width,m.height)).into_iter().map(|(w,h)|(w as i32,h as i32)).collect()).collect();
-        let screens:Vec<Screen<'_>>=outputs.iter().enumerate().map(|(id,m)| Screen {
-            id:id as i32, fps:m.fps,
-            resolution:WinRect {left:0,top:0,width:m.width as i32,height:m.height as i32,pixel_width:m.width as i32,pixel_height:m.height as i32},
-            primary:id==0,dpr:1.0,display_name:&m.name,video_track_index:if id==current {0} else {-1},
-            screen_type:0,builtin_screen_type:if m.name.starts_with("eDP") {1} else {2},scaled:&choices[id],
-            current:if id==current {output.map(|(w,h)|(w as i32,h as i32))} else {None},
-        }).collect();
+        // screen_type 5: ScreenType_Virtual (1) for viewer-created virtual displays, else
+        // ScreenType_Physics (0) — official gv_pb descriptor, GameViewerServer.exe 4.45.1.
+        let scaled:Vec<Vec<(i32,i32)>>=screens_list.iter().map(|(_,m)|scaled_sizes((m.width,m.height)).into_iter().map(|(w,h)|(w as i32,h as i32)).collect()).collect();
+        let screens:Vec<Screen<'_>>=screens_list.iter().zip(&scaled).map(|((id,m),scaled)| Screen {
+                id:*id as i32,fps:m.fps,
+                resolution:WinRect {left:0,top:0,width:m.width as i32,height:m.height as i32,pixel_width:m.width as i32,pixel_height:m.height as i32},
+                primary:*id==0,dpr:1.0,display_name:&m.name,video_track_index:if *id==current {0} else {-1},
+                screen_type:if *id>=crate::wayland::VIRTUAL_BASE {1} else {0},
+                builtin_screen_type:if m.name.starts_with("eDP") {1} else {2},scaled,
+                current:if *id==current {output.map(|(w,h)|(w as i32,h as i32))} else {None},
+            }).collect();
         return crate::initialization::encode_screen_sources(seq,timestamp,&screens,current as i32);
     }
     let (w, h) = (native.0 as i32, native.1 as i32);

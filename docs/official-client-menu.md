@@ -38,9 +38,10 @@ GameViewerService.exe（SYSTEM 服务，登录前控制）、GameViewerHealthd.e
 | 显示桌面 | SimpleAction 2 show_desktop（Super+D 注入） | ✅ | |
 | 窗口列表（show_windows, 3） | SimpleAction 3 | 🆕 | 与 show_desktop 同一 Super+D 再按一次（Win+D 切换语义） |
 | 多显示器 | 现有 screen-switch + UU_X11/WAYLAND_MULTISCREEN | ✅ | |
-| 虚拟显示器（screen_virtual, 1.2.1+） | RPC `CreateVirtualDisplayRequest/Response`、`RemoveVirtualDisplay*`、`VirtualDisplayInitResolution`、`VirtualDisplayMode` | ⬜ | Linux 路径：wlroots headless output / Xvfb 动态建删；官方用 IDD 驱动 |
+| 多显示器 | 现有 screen-switch + UU_X11/WAYLAND_MULTISCREEN | ✅ | |
+| 虚拟显示器（screen_virtual, 1.2.1+） | RPC 12 `CreateVirtualDisplayRequest{1: rep ScreenResolution, 2: count}` → 响应 8 `{1: error_code}`；13 `RemoveVirtualDisplayRequest{1: screen_id}` → 9（GameViewerServer.exe descriptor 反解） | 🆕 | `src/virtual_display.rs`：Hyprland headless output（`hyprctl output create headless` + 0.56 的 `hyprctl eval hl.monitor` 设分辨率——`output mode`/`keyword` 均无效，见 nixarchy#1031）。虚拟屏 id ≥100 稳定不随物理重建漂移，Screen 消息 `screen_type=1`（ScreenType_Virtual），建/删后重发 Message 7；崩溃遗留的 UUVIRT* 输出重启后自动接管；采集走既有 select/wlr-screencopy 路径（headless 帧已验证，VAAPI 编码 60 帧通过）。`virtual-display-probe [WxH]` 诊断子命令。官方响应 error_code 语义未实测（0=成功按本项目惯例） |
 | 超级屏幕（screen_super 4.2.3 / manual+fps 4.27+） | `EnterSuperScreenRequest/Response`、`QuitSuperScreen*`、`EnterSuperScreenFpsNotSupport` | 🔭 | 语义未知（疑似高帧率专属模式），抓包后再定 |
-| 副屏串流（second_screen, 4.16+） | 未知 | 🔭 | 与虚拟显示器同根 |
+| 副屏串流（second_screen, 4.16+） | 未知 | 🔭 | 与虚拟显示器同根；虚拟显示器已落地，同族的 enter/quit super screen 等抓包后接入 |
 | 单窗口串流（windows_display） | `ActiveWindowChange`、`WinRect`、`CaptureConfig`、SimpleAction 5 capture_window | ⬜ | X11 窗口区域采集可行；Wayland 难 |
 
 ## 安全菜单

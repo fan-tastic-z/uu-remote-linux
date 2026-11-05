@@ -831,11 +831,11 @@ async fn read_encoder_with(
 )->Result<(),String>{
     let selected_output=crate::wayland::capture_source(&display,portal.is_some(),settings.source_id);
     // Portal frames come from the session's current monitor, whatever the advertised mode says.
-    let size=portal.as_ref().map(|p|p.size()).or(selected_output.map(|s|(s.width,s.height))).unwrap_or(size);
+    let size=portal.as_ref().map(|p|p.size()).or(selected_output.as_ref().map(|s|(s.width,s.height))).unwrap_or(size);
     let kms=display.starts_with("kms:");
     let wayland=kms || display.starts_with("wayland:");
     // X11 multi-screen: x11grab reads only the selected monitor's region of the root.
-    let x11_region=selected_output.filter(|_|!wayland);
+    let x11_region=selected_output.clone().filter(|_|!wayland);
     let (permits_tx,mut permits_rx)=mpsc::channel::<OwnedSemaphorePermit>(4);
     let kms_capture=if kms {
         let capture=tokio::task::spawn_blocking(crate::kms::Capture::open).await.map_err(|_|"KMS worker failed")??;

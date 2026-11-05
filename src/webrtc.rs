@@ -737,6 +737,29 @@ impl WebRtcSession {
                                 (21, WireValue::Bytes(rpc)) => Some(*rpc), _ => None,
                             }) else { continue; };
                             let Ok(rpc_fields) = crate::protocol::decode_wire(rpc) else { continue; };
+                            // 虚拟显示器: official RpcRequest cases 12 (create) / 13 (remove), answered
+                            // with RpcResponse cases 8/9 {1 error_code}. The response body carries no
+                            // screen list: the viewer learns the new screens from the re-sent
+                            // Message 7 ScreenSources below (same path as a monitor switch).
+                            if desktop && crate::virtual_display::wants(&rpc_fields) {
+                                let bytes = rpc.to_vec();
+                                let handled = tokio::task::spawn_blocking(move || crate::virtual_display::handle_rpc(&bytes))
+                                    .await.ok().flatten();
+                                match handled {
+                                    Some((_case, body)) => {
+                                        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                                        let next = || sequence.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        let _ = response_tx.send(crate::initialization::envelope(next(), ts, 22, &body));
+                                        let current = *settings.borrow();
+                                        match crate::capture_setting::screen_sources(next(), ts, input_size, current.output, "Linux desktop") {
+                                            Ok(screens) => { let _ = response_tx.send(screens); }
+                                            Err(error) => log::warn!("Screen sources update failed: {}", error),
+                                        }
+                                    }
+                                    None => reject("Virtual display handling failed"),
+                                }
+                                continue;
+                            }
                             // X11: 分辨率 changes the display mode itself, like the official Windows host; the stream
                             // then carries the new native size instead of a scaled one (desktop_mode). With
                             // UU_X11_MULTISCREEN the monitor layout stays as it is and the stream is scaled.

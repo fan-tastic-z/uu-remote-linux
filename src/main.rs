@@ -48,6 +48,7 @@ mod inproc_encoder;
 mod capture_setting;
 mod audio;
 mod virtual_audio;
+mod virtual_display;
 mod privacy_screen;
 mod system_actions;
 mod annotation;
@@ -213,7 +214,7 @@ pub(crate) fn cli_pref_ok(which: &str, value: &str) -> bool {
     }
 }
 
-const SUBCOMMANDS: [&str; 21] = ["privacy-guard", "privacy-wallpaper", "privacy-screen-probe", "doctor", "show", "assist", "set-encoder", "set-codec", "desktop-input-probe", "virtual-audio-probe", "login", "unlock-check", "desktop-probe", "desktop-video-probe", "desktop-audio-probe", "wayland-capture",
+const SUBCOMMANDS: [&str; 22] = ["privacy-guard", "privacy-wallpaper", "privacy-screen-probe", "doctor", "show", "assist", "set-encoder", "set-codec", "desktop-input-probe", "virtual-audio-probe", "virtual-display-probe", "login", "unlock-check", "desktop-probe", "desktop-video-probe", "desktop-audio-probe", "wayland-capture",
     "wayland-input-probe", "wayland-text-probe", "clipboard-acceptance", "portal-acceptance", "ui-preview"];
 
 /// Unknown arguments and illegal set-encoder / set-codec values exit 2 (never start a second host).
@@ -633,6 +634,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if virtual_audio::active() { return Err("Virtual audio probe restore incomplete".into()); }
         println!("Virtual audio probe ended");
         return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("virtual-display-probe") {
+        // Optional WxH argument, e.g. `virtual-display-probe 2560x1440`.
+        let resolution=std::env::args().nth(2).and_then(|v| {
+            let (w,h)=v.split_once('x')?;
+            Some((w.parse().ok()?,h.parse().ok()?))
+        }).unwrap_or((1920,1080));
+        return virtual_display::probe(resolution).map_err(|e| e.into());
     }
     if std::env::args().nth(1).as_deref() == Some("login") {
         // Interactive: register this host and bind it to an account via QR scan

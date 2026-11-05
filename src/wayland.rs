@@ -210,8 +210,19 @@ pub fn text_probe()->Result<(),String> {
 // root to the selected monitor. No compositor layout or user credentials are modified.
 #[derive(Clone, Debug)]
 pub struct Output { pub name:String, pub width:u32, pub height:u32, pub fps:i32, pub x:i32, pub y:i32 }
+#[derive(Clone)]
 struct Inventory { outputs:Vec<Output>, x11:bool, portal:bool }
-static OUTPUTS: std::sync::OnceLock<Inventory> = std::sync::OnceLock::new();
+/// Viewer-created virtual displays (虚拟显示器, Hyprland headless outputs) are advertised with
+/// ids from here up: physical ids are inventory indices a rebuild could renumber, virtual ids
+/// stay stable for the viewer's display menu across removes.
+pub const VIRTUAL_BASE: usize = 100;
+/// Headless outputs this host creates are named with this prefix; leftovers from a crashed run
+/// are adopted back at inventory build instead of polluting the physical list.
+pub const VIRTUAL_PREFIX: &str = "UUVIRT";
+#[derive(Clone, Debug)]
+pub struct VirtualOutput { pub id:usize, pub output:Output }
+static OUTPUTS: std::sync::Mutex<Option<Inventory>> = std::sync::Mutex::new(None);
+static VIRTUALS: std::sync::Mutex<Vec<VirtualOutput>> = std::sync::Mutex::new(Vec::new());
 #[derive(Default)]
 struct Selection { id:usize, generation:u64, presented:Option<u64>, failed:bool }
 impl Selection {
@@ -224,34 +235,72 @@ impl Selection {
     fn ready(&self)->bool {self.presented==Some(self.generation)}
 }
 static SELECTION:std::sync::Mutex<Selection>=std::sync::Mutex::new(Selection {id:0,generation:0,presented:None,failed:false});
-fn inventory() -> &'static Inventory {
-    OUTPUTS.get_or_init(|| {
-        let backend=crate::desktop_backend::detect().ok();
-        if backend==Some(crate::desktop_backend::DesktopBackend::X11) && !crate::desktop_backend::headless()
-            && std::env::var("UU_X11_MULTISCREEN").ok().as_deref()==Some("1") {
-            let outputs=x11_outputs();
-            return Inventory {x11:!outputs.is_empty(),outputs,portal:false};
-        }
-        if backend==Some(crate::desktop_backend::DesktopBackend::Portal) && !crate::desktop_backend::headless() {
-            let outputs=portal_outputs();
-            return Inventory {portal:!outputs.is_empty(),outputs,x11:false};
-        }
-        if !cfg!(all(target_os="linux",feature="wayland"))
-            || std::env::var("UU_WAYLAND_MULTISCREEN").ok().as_deref()!=Some("1")
-            || backend!=Some(crate::desktop_backend::DesktopBackend::Wayland) {return Inventory {outputs:Vec::new(),x11:false,portal:false};}
-        let niri=std::env::var_os("NIRI_SOCKET").is_some();
-        let output=if niri {std::process::Command::new("niri").args(["msg","--json","outputs"]).output()}
-            else {std::process::Command::new("hyprctl").args(["monitors","-j"]).output()};
-        let result=output.map_err(|_|"monitor command unavailable").and_then(|output| {
-            if !output.status.success() {return Err("monitor command failed");}
-            let preferred=std::env::var("UU_WAYLAND_OUTPUT").unwrap_or_default();
-            if niri {parse_niri_outputs(&output.stdout,&preferred)} else {parse_outputs(&output.stdout,&preferred)}
-        });
-        let outputs=match result {Ok(outputs)=>outputs,Err(reason)=>{log::warn!("Wayland multi-screen disabled: {}",reason);Vec::new()}};
-        Inventory {outputs,x11:false,portal:false}
-    })
+fn build_inventory(force_wayland: bool) -> Inventory {
+    let backend=crate::desktop_backend::detect().ok();
+    if backend==Some(crate::desktop_backend::DesktopBackend::X11) && !crate::desktop_backend::headless()
+        && std::env::var("UU_X11_MULTISCREEN").ok().as_deref()==Some("1") {
+        let outputs=x11_outputs();
+        return Inventory {x11:!outputs.is_empty(),outputs,portal:false};
+    }
+    if backend==Some(crate::desktop_backend::DesktopBackend::Portal) && !crate::desktop_backend::headless() {
+        let outputs=portal_outputs();
+        return Inventory {portal:!outputs.is_empty(),outputs,x11:false};
+    }
+    if !cfg!(all(target_os="linux",feature="wayland"))
+        || backend!=Some(crate::desktop_backend::DesktopBackend::Wayland)
+        || (!force_wayland && std::env::var("UU_WAYLAND_MULTISCREEN").ok().as_deref()!=Some("1"))
+        {return Inventory {outputs:Vec::new(),x11:false,portal:false};}
+    let niri=std::env::var_os("NIRI_SOCKET").is_some();
+    let output=if niri {std::process::Command::new("niri").args(["msg","--json","outputs"]).output()}
+        else {std::process::Command::new("hyprctl").args(["monitors","-j"]).output()};
+    let result=output.map_err(|_|"monitor command unavailable").and_then(|output| {
+        if !output.status.success() {return Err("monitor command failed");}
+        let preferred=std::env::var("UU_WAYLAND_OUTPUT").unwrap_or_default();
+        if niri {parse_niri_outputs(&output.stdout,&preferred)} else {parse_outputs(&output.stdout,&preferred)}
+    });
+    let mut outputs=match result {Ok(outputs)=>outputs,Err(reason)=>{log::warn!("Wayland multi-screen disabled: {}",reason);Vec::new()}};
+    adopt_virtual_outputs(&mut outputs);
+    Inventory {outputs,x11:false,portal:false}
 }
-pub fn outputs() -> &'static [Output] {&inventory().outputs}
+/// Headless outputs still in the Hyprland layout after an earlier run ended are re-adopted as
+/// virtual displays (the viewer can remove them from its display menu); otherwise they would
+/// be advertised as physical screens with shifting ids.
+fn adopt_virtual_outputs(outputs: &mut Vec<Output>) {
+    let mut virtuals=VIRTUALS.lock().unwrap_or_else(|e|e.into_inner());
+    if !virtuals.is_empty() {
+        outputs.retain(|o|!o.name.starts_with(VIRTUAL_PREFIX));
+        return;
+    }
+    let mut next=0usize;
+    outputs.retain(|o| {
+        if !o.name.starts_with(VIRTUAL_PREFIX) {return true;}
+        let id=VIRTUAL_BASE+next; next+=1;
+        virtuals.push(VirtualOutput {id,output:o.clone()});
+        false
+    });
+    if !virtuals.is_empty() {log::info!("Adopted {} leftover virtual display(s)",virtuals.len());}
+}
+fn inventory() -> Inventory {
+    let mut slot=OUTPUTS.lock().unwrap_or_else(|e|e.into_inner());
+    if slot.is_none() {*slot=Some(build_inventory(false));}
+    slot.as_ref().expect("inventory just built").clone()
+}
+/// Re-reads the monitor inventory ignoring UU_WAYLAND_MULTISCREEN: creating a virtual display
+/// turns a single-screen host into a multi-screen one on demand (virtual_display::create).
+pub(crate) fn force_inventory() {
+    *OUTPUTS.lock().unwrap_or_else(|e|e.into_inner())=Some(build_inventory(true));
+}
+pub(crate) fn set_virtuals(list: Vec<VirtualOutput>) {
+    *VIRTUALS.lock().unwrap_or_else(|e|e.into_inner())=list;
+}
+pub fn virtuals() -> Vec<VirtualOutput> {VIRTUALS.lock().unwrap_or_else(|e|e.into_inner()).clone()}
+/// Advertised screens: physical outputs (id = inventory index) then virtual displays.
+pub fn screens() -> Vec<(usize,Output)> {
+    let mut screens:Vec<(usize,Output)>=inventory().outputs.into_iter().enumerate().collect();
+    screens.extend(virtuals().into_iter().map(|v|(v.id,v.output)));
+    screens
+}
+pub fn outputs() -> Vec<Output> {screens().into_iter().map(|(_,o)|o).collect()}
 /// GNOME portal grants one monitor per consent (multi-select is refused), so each monitor
 /// gets its own saved consent and a switch opens that monitor's session. Read once.
 fn portal_outputs()->Vec<Output> {
@@ -271,12 +320,12 @@ fn portal_outputs()->Vec<Output> {
 /// Connector of the selected screen when the portal advertises several monitors.
 pub fn portal_monitor()->Option<String> {
     if !inventory().portal {return None;}
-    source(selected()).map(|o|o.name.clone())
+    source(selected()).map(|o|o.name)
 }
 /// Monitor at a portal stream's logical position (Mutter logical layout).
 pub fn portal_monitor_at(x:i32,y:i32)->Option<String> {
     if !inventory().portal {return None;}
-    outputs().iter().find(|o|(o.x,o.y)==(x,y)).map(|o|o.name.clone())
+    outputs().into_iter().find(|o|(o.x,o.y)==(x,y)).map(|o|o.name)
 }
 /// X11 monitors are advertised: the stream captures the selected monitor's region of the root.
 pub fn x11_multiscreen()->bool {inventory().x11}
@@ -361,10 +410,13 @@ fn parse_outputs(json:&[u8],preferred:&str)->Result<Vec<Output>,&'static str> {
 }
 pub fn selection()->(usize,u64) {let s=SELECTION.lock().unwrap();(s.id,s.generation)}
 pub fn selected()->usize {selection().0}
-pub fn source(id:usize)->Option<&'static Output> {outputs().get(id)}
+pub fn source(id:usize)->Option<Output> {
+    if id>=VIRTUAL_BASE {return virtuals().into_iter().find(|v|v.id==id).map(|v|v.output);}
+    inventory().outputs.get(id).cloned()
+}
 pub fn input_size(fallback:(u32,u32))->(u32,u32) {source(selected()).map_or(fallback,|s|(s.width,s.height))}
 /// Region the encoder captures for this display: the Wayland output, or the selected X11 monitor.
-pub fn capture_source(display:&str,portal:bool,id:usize)->Option<&'static Output> {
+pub fn capture_source(display:&str,portal:bool,id:usize)->Option<Output> {
     if display.starts_with("wayland:") || (!portal && !display.starts_with("kms:") && x11_multiscreen()) {source(id)} else {None}
 }
 /// Offset of the selected X11 monitor in the root: absolute input is relative to that monitor.
