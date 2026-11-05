@@ -240,8 +240,12 @@ impl UUAuthClient {
 
         let mut param_map = BTreeMap::new();
         param_map.insert("x-param-plat".into(), "1".into());
-        param_map.insert("x-param-vn".into(), "4.42.0.2770".into());
-        param_map.insert("x-param-vc".into(), "2770".into());
+        // omarchy: the official Windows client is 4.44.0 (uuyc.163.com/download, 2026-10-21);
+        // the viewer showed "被控端版本过低" against the old 4.42.0.2770. The build number is
+        // inferred from the official build sequence (4.41.0.2311, 4.42.0.2770, 4.43.0.3607),
+        // not observed in the wild; capabilities stay negotiated by FeatureFlag, not by version.
+        param_map.insert("x-param-vn".into(), "4.44.0.3900".into());
+        param_map.insert("x-param-vc".into(), "3900".into());
         param_map.insert("x-param-pkgn".into(), "com.netease.gameviewer".into());
         param_map.insert("x-param-chn".into(), "gwqd".into());
         param_map.insert("x-param-lang".into(), "zh-CN".into());
@@ -261,7 +265,7 @@ impl UUAuthClient {
         headers.insert("Accept", HeaderValue::from_static("application/json"));
         headers.insert(
             "User-Agent",
-            HeaderValue::from_static("UURemote/4.42.0 (Windows NT 10.0; Win64; x64)"),
+            HeaderValue::from_static("UURemote/4.44.0 (Windows NT 10.0; Win64; x64)"),
         );
         if !self.creds.token.is_empty() {
             if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", self.creds.token)) { headers.insert("Authorization", v); }
