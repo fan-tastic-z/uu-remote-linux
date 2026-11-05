@@ -24,7 +24,7 @@ GameViewerService.exe（SYSTEM 服务，登录前控制）、GameViewerHealthd.e
 |---|---|---|---|
 | 清晰度（标清/高清/超清/原画/自动/自定义码率） | RPC 2 capture_setting（quality 1–6，v4 CUSTOM_BITRATE） | ✅ | |
 | 帧率 30/60/90 | capture_setting 字段 1 档位 + 字段 18 fpsCount | ✅ | |
-| 帧率 144（fps_144, 2.2.0+） | 同上（fpsCount 自由数值） | ⬜ | 核对编码器/CQ 上限不禁 144；低优先 |
+| 帧率 144（fps_144, 2.2.0+） | 同上（fpsCount 自由数值） | ✅ | 选项 4→144 映射与 fpsCount 直通已在（capture_setting.rs），管线无上限；官方门槛只在观看端菜单 |
 | 分辨率（跟随本地/远程/档位） | resolution_type 3/2、16/17、5/6 | ✅ | X11 xrandr；Wayland 缺 wlr-output-management 切换（backlog #2） |
 | 真彩 4:4:4 | chorma_format=3（v3 CHROMA_SAMPLING） | ✅ | NVENC/x264 4:4:4，VAAPI 回 4:2:0 |
 | HDR（screen_hdr, 4.2.2+） | capture_setting v6 HDR 字段 | 🔭 | 需抓包字段形状 + 采集/编码链路评估 |
@@ -36,7 +36,7 @@ GameViewerService.exe（SYSTEM 服务，登录前控制）、GameViewerHealthd.e
 | 菜单项 | 协议入口 | 状态 | 说明 |
 |---|---|---|---|
 | 显示桌面 | SimpleAction 2 show_desktop（Super+D 注入） | ✅ | |
-| 窗口列表（show_windows, 3） | SimpleAction 3 | ⬜ | 官方 = 撤销显示桌面；实现为再次切换 |
+| 窗口列表（show_windows, 3） | SimpleAction 3 | 🆕 | 与 show_desktop 同一 Super+D 再按一次（Win+D 切换语义） |
 | 多显示器 | 现有 screen-switch + UU_X11/WAYLAND_MULTISCREEN | ✅ | |
 | 虚拟显示器（screen_virtual, 1.2.1+） | RPC `CreateVirtualDisplayRequest/Response`、`RemoveVirtualDisplay*`、`VirtualDisplayInitResolution`、`VirtualDisplayMode` | ⬜ | Linux 路径：wlroots headless output / Xvfb 动态建删；官方用 IDD 驱动 |
 | 超级屏幕（screen_super 4.2.3 / manual+fps 4.27+） | `EnterSuperScreenRequest/Response`、`QuitSuperScreen*`、`EnterSuperScreenFpsNotSupport` | 🔭 | 语义未知（疑似高帧率专属模式），抓包后再定 |
@@ -63,7 +63,7 @@ GameViewerService.exe（SYSTEM 服务，登录前控制）、GameViewerHealthd.e
 | 终端 | RPC 28/29 + TERM 帧 | ✅ | |
 | 端口映射 | capture_type 9 + `PortMappingFrame` | ✅ | |
 | 标注 | RPC 27 draw（v1）；annotation_v2 = 4.40+ | ✅ | v2 差异待抓包 |
-| 任务管理器 | SimpleAction 13 show_taskmgr（启动 gnome-system-monitor 等） | ✅ | Omarchy 机器加 btop/foot 回退更贴合（小改） |
+| 任务管理器 | SimpleAction 13 show_taskmgr（gnome/plasma/xfce → foot+btop → kitty → xterm+top） | ✅ | Omarchy 机器走 foot+btop |
 | 快捷键（key_toggle） | 11 key_toggle | ⬜ | 检查现有 HUD 需求 |
 
 ## 设备/连接

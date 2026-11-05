@@ -12,6 +12,10 @@ pub const FF_SIMPLE_ACTION: u8 = 2;
 pub const FF_SYSTEM_METRICS: u8 = 2;
 
 pub const SHOW_DESKTOP: u64 = 2;
+/// Undo show desktop (official ACTION_TYPE_SHOW_WINDOWS): the desktop's show-desktop
+/// shortcut is a toggle on Windows and GNOME, so the same Super+D press reveals the
+/// windows again.
+pub const SHOW_WINDOWS: u64 = 3;
 /// Opens the desktop on an existing connection (the viewer's port mapping reuses its peer, #99).
 pub const CAPTURE_DESKTOP: u64 = 4;
 pub const REBOOT_SYSTEM: u64 = 9;
@@ -217,7 +221,11 @@ impl PeerActions {
     /// Blocking (spawns system tools); call from spawn_blocking.
     pub fn handle(&self, action: u64, value: Option<u64>, args: &[u8], show_desktop: impl FnOnce()) -> bool {
         match action {
-            SHOW_DESKTOP => { show_desktop(); log::info!("System action show_desktop"); return false }
+            SHOW_DESKTOP | SHOW_WINDOWS => {
+                show_desktop(); // a toggle: 2 minimizes, 3 reveals (Win+D semantics)
+                log::info!("System action {}", crate::control_protocol::simple_action_name(action).unwrap_or("?"));
+                return false
+            }
             LOCK_SYSTEM => { log::info!("System action lock_system: ok={}", lock_session()); return false }
             SPEAKER_OPENED | SPEAKER_CLOSED => {
                 let on = action == SPEAKER_OPENED;
@@ -226,7 +234,10 @@ impl PeerActions {
                 return false
             }
             SHOW_TASKMGR => {
-                let ok = detached("gnome-system-monitor", &[]) || detached("plasma-systemmonitor", &[]) || detached("xfce4-taskmanager", &[]);
+                // Native monitors first, then btop in a terminal (Omarchy/wlroots default set).
+                let ok = detached("gnome-system-monitor", &[]) || detached("plasma-systemmonitor", &[])
+                    || detached("xfce4-taskmanager", &[]) || detached("foot", &["-e", "btop"])
+                    || detached("kitty", &["-e", "btop"]) || detached("xterm", &["-e", "top"]);
                 log::info!("System action show_taskmgr: ok={}", ok); return false
             }
             REBOOT_SYSTEM => { log::warn!("System action reboot_system requested by viewer"); log::info!("reboot ok={}", quiet("systemctl", &["--no-ask-password", "reboot"])); return false }

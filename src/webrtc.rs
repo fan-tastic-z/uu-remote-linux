@@ -1390,7 +1390,7 @@ impl WebRtcSession {
                                             tokio::spawn(crate::session_lock::handle_auto_unlock(password, chan, seq_out));
                                         }
                                         use crate::system_actions as sa;
-                                        if matches!(action, sa::SHOW_DESKTOP | sa::REBOOT_SYSTEM | sa::LOCK_SYSTEM | sa::SHUTDOWN_SYSTEM | sa::SHOW_TASKMGR
+                                        if matches!(action, sa::SHOW_DESKTOP | sa::SHOW_WINDOWS | sa::REBOOT_SYSTEM | sa::LOCK_SYSTEM | sa::SHUTDOWN_SYSTEM | sa::SHOW_TASKMGR
                                             | sa::MUTE_SYSTEM | sa::MUTE_RESTORE | sa::MUTE_PERMANENT | sa::MUTE_TEMPORARY | sa::SET_AUTO_LOCK
                                             | sa::SPEAKER_OPENED | sa::SPEAKER_CLOSED) {
                                             let value = action_fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Varint(v), 5) => Some(*v), _ => None });
