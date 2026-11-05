@@ -76,22 +76,31 @@ fn main() {
         println!("cargo:rustc-link-lib=Xfixes");
         println!("cargo:rustc-link-lib=dl"); // pam_check.c loads libpam at runtime
         // Optional GTK3 login window: built when gtk+-3.0 is installed, else `login` stays text-only.
-        let gtk = |arg: &str| std::process::Command::new("pkg-config").args([arg, "gtk+-3.0"]).output().ok()
-            .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-        match (std::env::var_os("UU_NO_GTK").is_none()).then(|| gtk("--cflags").zip(gtk("--libs"))).flatten() {
-            Some((cflags, libs)) => {
-                let mut build = cc::Build::new();
-                build.file("c_engine/assist_window.c").file("c_engine/privacy_wallpaper.c").file("c_engine/viewer_window.c").file("c_engine/viewer_tools.c").file("c_engine/ui_theme.c").flag_if_supported("-Wno-deprecated-declarations");
-                for flag in cflags.split_whitespace() { build.flag(flag); }
-                build.compile("uu_login_window");
-                for flag in libs.split_whitespace() {
-                    if let Some(lib) = flag.strip_prefix("-l") { println!("cargo:rustc-link-lib={lib}"); }
-                    else if let Some(dir) = flag.strip_prefix("-L") { println!("cargo:rustc-link-search=native={dir}"); }
+        if std::env::var_os("CARGO_FEATURE_NSH_UI").is_some() {
+            // GTK3 and GTK4 cannot share one process: their C symbols clash (gtk_init_check
+            // resolves into libgtk-3, so GTK4 never initializes). With `nsh-ui` the nsh/GTK4
+            // window (src/ui) replaces the C window unit; emitting the same `uu_gtk` cfg keeps
+            // the extern-"C" call sites in assist.rs/login_ui.rs compiling, resolved by the
+            // #[no_mangle] bridge in src/ui/bridge.rs.
+            println!("cargo:rustc-cfg=uu_gtk");
+        } else {
+            let gtk = |arg: &str| std::process::Command::new("pkg-config").args([arg, "gtk+-3.0"]).output().ok()
+                .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+            match (std::env::var_os("UU_NO_GTK").is_none()).then(|| gtk("--cflags").zip(gtk("--libs"))).flatten() {
+                Some((cflags, libs)) => {
+                    let mut build = cc::Build::new();
+                    build.file("c_engine/assist_window.c").file("c_engine/privacy_wallpaper.c").file("c_engine/viewer_window.c").file("c_engine/viewer_tools.c").file("c_engine/ui_theme.c").flag_if_supported("-Wno-deprecated-declarations");
+                    for flag in cflags.split_whitespace() { build.flag(flag); }
+                    build.compile("uu_login_window");
+                    for flag in libs.split_whitespace() {
+                        if let Some(lib) = flag.strip_prefix("-l") { println!("cargo:rustc-link-lib={lib}"); }
+                        else if let Some(dir) = flag.strip_prefix("-L") { println!("cargo:rustc-link-search=native={dir}"); }
+                    }
+                    println!("cargo:rustc-link-lib=pthread");
+                    println!("cargo:rustc-cfg=uu_gtk");
                 }
-                println!("cargo:rustc-link-lib=pthread");
-                println!("cargo:rustc-cfg=uu_gtk");
+                None => println!("cargo:warning=gtk+-3.0 not found: building without the login window"),
             }
-            None => println!("cargo:warning=gtk+-3.0 not found: building without the login window"),
         }
         let plugins = std::env::var_os("CARGO_FEATURE_ENGINE_PLUGINS").is_some();
         if plugins && std::env::var_os("CARGO_FEATURE_PORTAL").is_some() {

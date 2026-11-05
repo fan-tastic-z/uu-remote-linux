@@ -20,6 +20,8 @@ mod config;
 mod i18n;
 mod login;
 mod login_ui;
+#[cfg(all(feature = "nsh-ui", target_os = "linux"))]
+mod ui;
 mod session_lock;
 mod capture;
 mod kms;
@@ -211,8 +213,8 @@ pub(crate) fn cli_pref_ok(which: &str, value: &str) -> bool {
     }
 }
 
-const SUBCOMMANDS: [&str; 20] = ["privacy-guard", "privacy-wallpaper", "privacy-screen-probe", "doctor", "show", "assist", "set-encoder", "set-codec", "desktop-input-probe", "virtual-audio-probe", "login", "unlock-check", "desktop-probe", "desktop-video-probe", "desktop-audio-probe", "wayland-capture",
-    "wayland-input-probe", "wayland-text-probe", "clipboard-acceptance", "portal-acceptance"];
+const SUBCOMMANDS: [&str; 21] = ["privacy-guard", "privacy-wallpaper", "privacy-screen-probe", "doctor", "show", "assist", "set-encoder", "set-codec", "desktop-input-probe", "virtual-audio-probe", "login", "unlock-check", "desktop-probe", "desktop-video-probe", "desktop-audio-probe", "wayland-capture",
+    "wayland-input-probe", "wayland-text-probe", "clipboard-acceptance", "portal-acceptance", "ui-preview"];
 
 /// Unknown arguments and illegal set-encoder / set-codec values exit 2 (never start a second host).
 /// help / -h / --help exit 0 so main prints usage instead of starting the host.
@@ -424,6 +426,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if std::env::args().nth(1).as_deref() == Some("show") { return show_running_host(); }
+    if std::env::args().nth(1).as_deref() == Some("ui-preview") {
+        #[cfg(all(feature = "nsh-ui", target_os = "linux"))]
+        { crate::ui::preview(); return Ok(()); }
+        #[cfg(not(all(feature = "nsh-ui", target_os = "linux")))]
+        { return Err("this build has no nsh-ui feature; rebuild with --features nsh-ui".into()); }
+    }
     if matches!(std::env::args().nth(1).as_deref(), Some("set-encoder") | Some("set-codec")) { return set_video_pref(); }
     if assist_enabled && !unified {
         if std::env::args().len() > 2 { return Err("assist accepts no additional arguments; configure it with a private UU_CONFIG".into()); }

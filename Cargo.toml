@@ -33,6 +33,8 @@ engine-plugins = []
 # In-process X11 capture and NVENC encoding: vendored NVENC headers, NVIDIA driver libraries loaded at runtime.
 # Other encoders keep the FFmpeg process pipeline. Off by default.
 inproc-av = ["dep:x11rb"]
+# nsh/GTK4 host window (this fork's Omarchy machine); the GTK3 C window stays the fallback elsewhere.
+nsh-ui = ["dep:nsh-core", "dep:nsh-base", "dep:nsh-engine", "dep:nsh-platform-linux"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -57,6 +59,11 @@ qrcode = { version = "0.14", default-features = false }
 env_logger = "0.11"
 ffmpeg-next = { version = "6.1", optional = true, default-features = false, features = ["codec", "format", "device", "software-scaling", "software-resampling"] }
 x11rb = { version = "0.13", features = ["damage", "shm", "allow-unsafe-code"], optional = true }
+# Pinned to the commit validated on this machine (2026-11-05); nsh moves fast.
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "6170a4461481", optional = true }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "6170a4461481", optional = true }
+nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "6170a4461481", optional = true }
+nsh-platform-linux = { git = "https://github.com/longbridge/nsh", rev = "6170a4461481", optional = true }
 
 sdl2 = { version = "0.37", optional = true, features = ["use-pkgconfig"] }
 ab_glyph = { version = "0.2", optional = true }
