@@ -81,7 +81,9 @@ fn start_with(sections: state::Sections, hidden: bool, hide_on_close: bool) -> b
     INITIAL_SECTIONS.set(sections).ok();
     if PREVIEW.load(Ordering::SeqCst) {
         // Mock state for iterating on the UI; the engine bridge applies it after the
-        // first render installs the signal handles.
+        // first render installs the signal handles. The QR is a deterministic fake
+        // pattern so the preview exercises the same decode path without ever holding
+        // a real login credential.
         state::apply(state::Patch::Device(state::Device {
             id: "233 814 729".into(),
             code: "836 217".into(),
@@ -93,6 +95,7 @@ fn start_with(sections: state::Sections, hidden: bool, hide_on_close: bool) -> b
             status: crate::i18n::s("预览：扫码登录状态文案", "Preview: sign-in status line").to_owned(),
             error: false,
         }));
+        state::apply(state::Patch::Qr(bridge::qr_png_uri(preview_qr_pixels(), PREVIEW_QR_EDGE)));
     }
     let (tx, rx) = mpsc::channel::<bool>();
     let (exit_tx, exit_rx) = mpsc::channel::<()>();
@@ -224,4 +227,35 @@ pub fn closed() -> bool {
 /// Whether the window is live and can be presented.
 pub fn ui_ready() -> bool {
     READY.load(Ordering::SeqCst) && !CLOSED.load(Ordering::SeqCst)
+}
+
+/// The preview QR's edge in pixels (26 modules at 8 px).
+const PREVIEW_QR_EDGE: u32 = 208;
+
+/// A deterministic fake QR pattern — finder squares at three corners, xorshift filler —
+/// as RGBA8, the same format `uu_login_ui_set_qr` receives.
+fn preview_qr_pixels() -> Vec<u8> {
+    let (modules, scale) = (26usize, 8usize);
+    let edge = modules * scale;
+    let mut rgba = vec![255u8; edge * edge * 4];
+    let mut paint = |mx: usize, my: usize| {
+        for dy in 0..scale { for dx in 0..scale {
+            let offset = ((my * scale + dy) * edge + mx * scale + dx) * 4;
+            rgba[offset..offset + 3].fill(0);
+        }}
+    };
+    for i in 0..7 { for j in 0..7 {
+        let on = i == 0 || i == 6 || j == 0 || j == 6 || (2..=4).contains(&i) && (2..=4).contains(&j);
+        if on {
+            paint(j, i); // top left
+            paint(modules - 7 + j, i); // top right
+            paint(j, modules - 7 + i); // bottom left
+        }
+    }}
+    let mut seed = 0x2026_1105u32;
+    for y in 8..modules - 8 { for x in 8..modules - 8 {
+        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+        if seed % 5 < 2 { paint(x, y); }
+    }}
+    rgba
 }

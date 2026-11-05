@@ -34,8 +34,7 @@ engine-plugins = []
 # Other encoders keep the FFmpeg process pipeline. Off by default.
 inproc-av = ["dep:x11rb"]
 # nsh/GTK4 host window (this fork's Omarchy machine); the GTK3 C window stays the fallback elsewhere.
-nsh-ui = ["dep:nsh-core", "dep:nsh-base", "dep:nsh-engine", "dep:nsh-platform-linux"]
-
+nsh-ui = ["dep:nsh-core", "dep:nsh-base", "dep:nsh-engine", "dep:nsh-platform-linux", "dep:png"]
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.23", features = ["rustls-tls-webpki-roots"] }
@@ -67,6 +66,7 @@ nsh-platform-linux = { git = "https://github.com/longbridge/nsh", rev = "6170a44
 
 sdl2 = { version = "0.37", optional = true, features = ["use-pkgconfig"] }
 ab_glyph = { version = "0.2", optional = true }
+# Viewer HUD screenshots and, under nsh-ui, the login QR's data-URI PNG.
 png = { version = "0.18", optional = true }
 
 [dev-dependencies]

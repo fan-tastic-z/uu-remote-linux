@@ -21,6 +21,7 @@ pub fn HostApp() -> impl IntoElement {
         account: global::<state::Account>(),
         problem: global::<state::Problem>(),
         sections: global::<state::Sections>(),
+        qr: global::<state::Qr>(),
     });
     // The engine defaults every section to hidden; equal writes do not notify.
     state::apply_now(state::Patch::Sections(super::initial_sections()));
@@ -221,7 +222,8 @@ fn signed_out_flow() -> impl IntoElement {
         .child(
             view().flex_row().gap_4().items_center()
                 .child(
-                    // The QR image lands with the login bridge; the white pad stays.
+                    // The QR (a credential) renders from its data URI; until the login
+                    // flow sends one, the pad explains itself.
                     view()
                         .w(px(160.0))
                         .h(px(160.0))
@@ -229,7 +231,14 @@ fn signed_out_flow() -> impl IntoElement {
                         .bg(rgb(0xffffff))
                         .items_center()
                         .justify_center()
-                        .child(text(s("二维码加载后显示于此", "The QR code shows here")).text_color(rgb(0x9893a5))),
+                        .child(when(move || state::Qr::get().uri.is_some(), || {
+                            image(move || state::Qr::get().uri.unwrap_or_default())
+                                .w(px(160.0))
+                                .h(px(160.0))
+                        }))
+                        .child(when(move || state::Qr::get().uri.is_none(), || {
+                            text(s("二维码加载后显示于此", "The QR code shows here")).text_color(rgb(0x9893a5))
+                        })),
                 )
                 .child(
                     view().gap_2()

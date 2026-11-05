@@ -92,6 +92,13 @@ pub struct Problem {
     pub text: Option<String>,
 }
 
+/// The login QR as a `data:image/png;base64` URI — a credential until it expires: it goes
+/// to the window, never into a log. `None` is the placeholder pad.
+#[derive(Clone, Default, PartialEq)]
+pub struct Qr {
+    pub uri: Option<String>,
+}
+
 /// A state update from the host, applied on the UI thread.
 pub enum Patch {
     /// The whole 本设备 card (the visible-code flag is kept from the current value).
@@ -100,6 +107,8 @@ pub enum Patch {
     Account(Account),
     Problem(Option<String>),
     Sections(Sections),
+    /// The login QR's data URI (`None`: back to the placeholder pad).
+    Qr(Option<String>),
     /// Reveals the 本设备 card (a second `start`).
     ShowAssist,
     /// Reveals the 账号 card (login attached to the running window).
@@ -112,6 +121,7 @@ pub(crate) struct Handles {
     pub account: Signal<Account>,
     pub problem: Signal<Problem>,
     pub sections: Signal<Sections>,
+    pub qr: Signal<Qr>,
 }
 
 thread_local! {
@@ -144,6 +154,7 @@ pub(crate) fn apply_now(patch: Patch) {
             Patch::Allowed(allowed) => h.device.update(|d| d.allowed = allowed),
             Patch::Account(account) => h.account.set(account),
             Patch::Problem(text) => h.problem.set(Problem { text }),
+            Patch::Qr(uri) => h.qr.set(Qr { uri }),
             Patch::Sections(sections) => h.sections.set(sections),
             Patch::ShowAssist => h.sections.update(|s| s.assist = true),
             Patch::ShowAccount => h.sections.update(|s| s.account = true),
@@ -204,6 +215,12 @@ impl Account {
 }
 
 impl Problem {
+    pub fn get() -> Self {
+        global::<Self>().with(Clone::clone)
+    }
+}
+
+impl Qr {
     pub fn get() -> Self {
         global::<Self>().with(Clone::clone)
     }

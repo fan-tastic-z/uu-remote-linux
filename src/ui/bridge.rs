@@ -92,10 +92,27 @@ pub extern "C" fn uu_assist_ui_take_command(arg: *mut c_char, len: usize) -> c_i
 
 #[no_mangle]
 pub extern "C" fn uu_login_ui_set_qr(rgba: *const u8, edge: c_int) {
-    // Count only: the QR image is a login credential (ground rule 2) until it is drawn.
-    if !rgba.is_null() && edge > 0 {
-        log::debug!("QR frame for the account card: edge={edge}");
+    // The QR image is a login credential (ground rule 2): it goes to the window and the
+    // account card, never into a log. Count only on failure.
+    if rgba.is_null() || edge <= 0 || edge > 4096 { return; }
+    let edge = edge as usize;
+    let pixels = unsafe { std::slice::from_raw_parts(rgba, edge * edge * 4) }.to_vec();
+    match qr_png_uri(pixels, edge as u32) {
+        Some(uri) => state::apply(Patch::Qr(Some(uri))),
+        None => log::warn!("QR frame rejected: PNG encode failed, edge={edge}"),
     }
+}
+
+/// QR pixels (row-major RGBA8) as a `data:image/png;base64` URI — the form nsh's image
+/// loader accepts (`data:` URIs decode without a file or network round trip).
+pub(crate) fn qr_png_uri(pixels: Vec<u8>, edge: u32) -> Option<String> {
+    use base64::Engine as _;
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, edge, edge);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().ok()?.write_image_data(&pixels).ok()?;
+    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
 }
 
 #[no_mangle]
