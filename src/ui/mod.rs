@@ -12,7 +12,8 @@
 pub mod app;
 mod bridge;
 mod state;
-pub mod theme;
+mod theme;
+mod tray;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -176,6 +177,7 @@ fn build_window(hidden: bool, ready: mpsc::Sender<bool>) -> bool {
         }
         view.load(App::Rust(Root::of::<app::HostApp>()));
         window.set_child(Some(&view.widget()));
+        tray::start();
         let keep = RefCell::new(Some(view));
         window.connect_destroy(move |_| {
             if let Some(view) = keep.borrow_mut().take() { view.stop(); }
