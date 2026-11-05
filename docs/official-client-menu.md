@@ -29,7 +29,7 @@ GameViewerService.exe（SYSTEM 服务，登录前控制）、GameViewerHealthd.e
 | 真彩 4:4:4 | chorma_format=3（v3 CHROMA_SAMPLING） | ✅ | NVENC/x264 4:4:4，VAAPI 回 4:2:0 |
 | HDR（screen_hdr, 4.2.2+） | capture_setting v6 HDR 字段 | 🔭 | 需抓包字段形状 + 采集/编码链路评估 |
 | 缩放（screen_zoomscale, 4.0.0+） | 未知 | 🔭 | 观看端缩放系数下发？ |
-| 屏幕旋转（screen_orientation, 4.16+） | `SendFlipScreenRequest/Response` | ⬜ | |
+| 屏幕旋转（screen_orientation, 4.16+） | RPC 22 `SendFlipScreenRequest{1: ScreenOrientation}` → 响应 18 `{1: error_code}`（1=横屏 2=竖屏；无屏幕 id，作用于当前串流输出） | 🆕 | `src/flip_screen.rs`：Hyprland `hyprctl eval hl.monitor({transform})`（0.56 上 `output <name> transform` 子命令同样返回 ok 不生效）；transform 1-3 现在允许采集（原 niri-only gate 是未验证非不可用——headless 90° 实测 SHM 旋转拷贝 + VAAPI 编码 1080x1920 通过）；`parse_outputs`/虚拟屏清单对奇数 transform 交换宽高广播逻辑尺寸；旋转成功后 source_generation+1 重启采集并重发 ScreenSources。portrait→90°顺时针为离线假设，官方方向待 Mac 实测；指针映射（Hyprland 逻辑坐标）待实测 |
 
 ## 显示菜单（桌面/显示器）
 

@@ -62,7 +62,9 @@ fn free_name() -> String {
     (0..).map(|n| format!("{}{n}", crate::wayland::VIRTUAL_PREFIX)).find(|name| !used.contains(name)).expect("bounded by MAX_VIRTUAL")
 }
 
-/// Headless outputs present in `hyprctl monitors -j` (enabled, untransformed, our prefix).
+/// Headless outputs present in `hyprctl monitors -j` (enabled, our prefix). Transformed
+/// outputs (flip_screen) are kept upright: dims swap for odd transforms, flipped variants
+/// 4-7 are unusable, same policy as wayland::parse_outputs.
 fn live_outputs() -> Vec<crate::wayland::Output> {
     let prefix = crate::wayland::VIRTUAL_PREFIX;
     let mut live = Vec::new();
@@ -70,11 +72,13 @@ fn live_outputs() -> Vec<crate::wayland::Output> {
     let Ok(monitors) = serde_json::from_slice::<Vec<serde_json::Value>>(raw.as_bytes()) else { return live };
     for m in monitors {
         let output = (|| {
-            if m["disabled"].as_bool() == Some(true) || m["transform"].as_u64() != Some(0) { return None; }
+            if m["disabled"].as_bool() == Some(true) { return None; }
+            let transform = m["transform"].as_u64().unwrap_or(0);
+            if transform > 3 { return None; }
             let name = m["name"].as_str()?;
             if !name.starts_with(prefix) || name.len() > 127 { return None; }
-            let width = u32::try_from(m["width"].as_u64()?).ok()?;
-            let height = u32::try_from(m["height"].as_u64()?).ok()?;
+            let (mut width, mut height) = (u32::try_from(m["width"].as_u64()?).ok()?, u32::try_from(m["height"].as_u64()?).ok()?);
+            if transform & 1 == 1 { std::mem::swap(&mut width, &mut height); }
             // Headless outputs report no refresh rate; advertise a desktop default.
             let fps = m["refreshRate"].as_f64().map_or(60, |v| v.round().clamp(1.0, 240.0) as i32);
             if width < 2 || height < 2 || width > 16384 || height > 16384 { return None; }
@@ -152,8 +156,9 @@ pub fn remove(screen_id: i64) -> Result<(), String> {
 }
 
 /// Rebuilds the advertised virtual list from `hyprctl monitors -j`, keeping every live output's
-/// id stable (ids of removed displays are only reused after a refresh without them).
-fn refresh() {
+/// id stable (ids of removed displays are only reused after a refresh without them). Also
+/// called after a flip_screen rotation so the virtual sizes follow the transform.
+pub(crate) fn refresh() {
     let live = live_outputs();
     let previous = crate::wayland::virtuals();
     let mut used: Vec<usize> = previous.iter().map(|v| v.id).collect();

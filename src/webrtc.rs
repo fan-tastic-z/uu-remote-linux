@@ -737,6 +737,32 @@ impl WebRtcSession {
                                 (21, WireValue::Bytes(rpc)) => Some(*rpc), _ => None,
                             }) else { continue; };
                             let Ok(rpc_fields) = crate::protocol::decode_wire(rpc) else { continue; };
+                            // 屏幕旋转: official RpcRequest case 22 SendFlipScreenRequest {1
+                            // screen_orientation} → response 18 {1 error_code}. Rotating the
+                            // streamed output changes its size under the encoder: bump the source
+                            // generation (same as an X11 mode change) and re-advertise screens.
+                            if desktop && crate::flip_screen::wants(&rpc_fields) {
+                                let bytes = rpc.to_vec();
+                                let handled = tokio::task::spawn_blocking(move || crate::flip_screen::handle_rpc(&bytes))
+                                    .await.ok().flatten();
+                                match handled {
+                                    Some((_case, body, changed)) => {
+                                        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                                        let next = || sequence.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        let _ = response_tx.send(crate::initialization::envelope(next(), ts, 22, &body));
+                                        if changed {
+                                            settings.send_modify(|s| s.source_generation = s.source_generation.wrapping_add(1));
+                                            let current = *settings.borrow();
+                                            match crate::capture_setting::screen_sources(next(), ts, input_size, current.output, "Linux desktop") {
+                                                Ok(screens) => { let _ = response_tx.send(screens); }
+                                                Err(error) => log::warn!("Screen sources update failed: {}", error),
+                                            }
+                                        }
+                                    }
+                                    None => reject("Screen rotation handling failed"),
+                                }
+                                continue;
+                            }
                             // 虚拟显示器: official RpcRequest cases 12 (create) / 13 (remove), answered
                             // with RpcResponse cases 8/9 {1 error_code}. The response body carries no
                             // screen list: the viewer learns the new screens from the re-sent

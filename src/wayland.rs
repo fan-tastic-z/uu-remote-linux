@@ -395,10 +395,15 @@ fn parse_outputs(json:&[u8],preferred:&str)->Result<Vec<Output>,&'static str> {
     let monitors=serde_json::from_slice::<Vec<serde_json::Value>>(json).map_err(|_|"Invalid monitor inventory")?;
     let mut seen=std::collections::HashSet::new();
     let mut outputs:Vec<Output>=monitors.into_iter().filter_map(|m| {
-        if m["disabled"].as_bool()==Some(true) || m["transform"].as_u64()!=Some(0) {return None;}
+        if m["disabled"].as_bool()==Some(true) {return None;}
+        // Transformed outputs (flip_screen): the engine captures them upright (the SHM copy
+        // rotates, wayland_engine.c); flipped variants 4-7 stay unsupported. hyprctl reports
+        // the mode in physical orientation, so odd transforms swap to the logical upright size.
+        let transform=m["transform"].as_u64().unwrap_or(0);
+        if transform>3 {return None;}
         let name=m["name"].as_str()?;
-        let width=u32::try_from(m["width"].as_u64()?).ok()?;
-        let height=u32::try_from(m["height"].as_u64()?).ok()?;
+        let (mut width,mut height)=(u32::try_from(m["width"].as_u64()?).ok()?,u32::try_from(m["height"].as_u64()?).ok()?);
+        if transform&1==1 {std::mem::swap(&mut width,&mut height);}
         if name.is_empty() || name.len()>127 || name.contains('\0') || !seen.insert(name.to_owned())
             || width<2 || height<2 || width>16384 || height>16384 || u64::from(width)*u64::from(height)*4>256*1024*1024 {return None;}
         Some(Output {name:name.into(),width,height,fps:m["refreshRate"].as_f64()?.round().clamp(1.0,240.0) as i32,x:0,y:0})
@@ -505,6 +510,18 @@ pub fn requested_output(data:&[u8]) -> Option<usize> {
 mod monitor_switch_tests {
     use super::*;
     #[test]
+    fn transformed_monitors_advertise_upright() {
+        // flip_screen: hyprctl reports the mode in physical orientation; odd transforms swap
+        // to the logical upright size, flipped variants (4-7) stay unsupported.
+        let json = br#"[{"name":"HDMI-A-1","width":3840,"height":2160,"transform":1,"refreshRate":60.0},{"name":"DP-1","width":1920,"height":1080,"transform":0,"refreshRate":60.0},{"name":"DP-2","width":1920,"height":1080,"transform":5,"refreshRate":60.0}]"#;
+        let outputs = parse_outputs(json, "").unwrap();
+        let hdmi = outputs.iter().find(|o| o.name == "HDMI-A-1").unwrap();
+        assert_eq!((hdmi.width, hdmi.height), (2160, 3840));
+        let dp = outputs.iter().find(|o| o.name == "DP-1").unwrap();
+        assert_eq!((dp.width, dp.height), (1920, 1080));
+        assert!(outputs.iter().all(|o| o.name != "DP-2"));
+    }
+    #[test]
     fn capture_setting_screen_zero_and_signed_current_target() {
         // Message.rpc_request(21), RpcRequest.capture_setting(2), screen_id(4).
         let request=|payload:&[u8]| {let mut rpc=vec![18,payload.len() as u8];rpc.extend(payload);crate::initialization::envelope(1,2,21,&rpc)};
@@ -568,12 +585,16 @@ mod selection_regressions {
     }
     #[test]
     fn unusable_outputs_are_not_advertised() {
+        // flip_screen: transformed outputs (1-3) are advertised upright (dims swapped);
+        // flipped variants (4-7) stay unusable, as do oversized and disabled ones.
         let json=br#"[{"name":"rotated","width":1920,"height":1080,"transform":1,"refreshRate":60},
+          {"name":"flipped","width":1920,"height":1080,"transform":5,"refreshRate":60},
           {"name":"too-large","width":16000,"height":16000,"transform":0,"refreshRate":60},
           {"name":"off","width":1920,"height":1080,"disabled":true,"transform":0,"refreshRate":60},
           {"name":"normal","width":1920,"height":1080,"transform":0,"refreshRate":60}]"#;
         let outputs=parse_outputs(json,"").unwrap();
-        assert_eq!(outputs.len(),1);assert_eq!(outputs[0].name,"normal");
+        assert_eq!(outputs.iter().map(|m|(m.name.as_str(),m.width,m.height)).collect::<Vec<_>>(),
+            vec![("normal",1920,1080),("rotated",1080,1920)]);
         assert!(parse_outputs(b"not JSON","").is_err());
     }
     #[test]
