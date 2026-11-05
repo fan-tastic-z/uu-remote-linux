@@ -211,10 +211,20 @@ fn chroma_args(settings: &VideoSettings, encoder: Encoder) -> (&'static str, &'s
 }
 pub(crate) fn vaapi_device() -> String { std::env::var("UU_VAAPI_DEVICE").unwrap_or_else(|_| "/dev/dri/renderD128".into()) }
 
-/// NV12 conversion must precede upload; scaling runs on software frames, before hwupload.
+/// omarchy: upload the RGB capture to a VAAPI surface first and convert/scale on the GPU
+/// (VEBOX/VPP). The previous `format=nv12,hwupload` ran swscale on the CPU before the upload —
+/// with h264_vaapi at 4K30 the ffmpeg process still burned ~300% CPU on this host (measured
+/// 2026-11-05; the encode itself was already on the iGPU), dominated by the software BGRA→NV12
+/// pass. VPP defaults to BT.709 while swscale's untagled default is BT.601, so pin
+/// out_color_matrix=smpte170m:out_range=tv to keep the colorimetry validated against the
+/// official viewers (measured PSNR vs the swscale path, same frame, h264_vaapi qp18:
+/// 25.6 dB unpinned → 40.5 dB pinned). hwupload passes yuv420p (synthetic probes) through
+/// unchanged, and the odd-size pad in scale_options still runs in software before it.
 fn vaapi_filter(output: Option<(u32, u32)>) -> String {
-    let scale = output.map_or(String::new(), |(w,h)| format!("scale={w}:{h}:flags=bilinear,"));
-    format!("{scale}format=nv12,hwupload")
+    match output {
+        Some((w,h)) => format!("hwupload,scale_vaapi=w={w}:h={h}:format=nv12:out_color_matrix=smpte170m:out_range=tv"),
+        None => "hwupload,scale_vaapi=format=nv12:out_color_matrix=smpte170m:out_range=tv".into(),
+    }
 }
 fn vaapi_options(settings: &VideoSettings, gop: &str) -> Vec<String> {
     let (maxrate, buffer) = rate_args(settings, Encoder::Vaapi);
@@ -1407,9 +1417,9 @@ mod tests {
             assert!(scale_options(&native, encoder, None).is_empty());
         }
         assert_eq!(scale_options(&native, Encoder::Vaapi, Some((2560, 2507))),
-            vec!["-vf".to_string(), format!("{pad},format=nv12,hwupload")]);
+            vec!["-vf".to_string(), format!("{pad},hwupload,scale_vaapi=format=nv12:out_color_matrix=smpte170m:out_range=tv")]);
         assert_eq!(scale_options(&native, Encoder::Vaapi, Some((2560, 2508))),
-            vec!["-vf".to_string(), "format=nv12,hwupload".to_string()]);
+            vec!["-vf".to_string(), "hwupload,scale_vaapi=format=nv12:out_color_matrix=smpte170m:out_range=tv".to_string()]);
         let scaled = VideoSettings { output: Some((1280, 720)), ..Default::default() };
         assert_eq!(scale_options(&scaled, Encoder::Cpu, Some((2560, 2507))),
             vec!["-vf".to_string(), "scale=1280:720:flags=bilinear".to_string()]);
@@ -1618,9 +1628,9 @@ mod tests {
     }
 
     #[test]
-    fn vaapi_is_explicit_and_upload_follows_scale() {
-        assert_eq!(vaapi_filter(None), "format=nv12,hwupload");
-        assert_eq!(vaapi_filter(Some((1280,720))), "scale=1280:720:flags=bilinear,format=nv12,hwupload");
+    fn vaapi_uploads_rgb_and_converts_on_the_gpu() {
+        assert_eq!(vaapi_filter(None), "hwupload,scale_vaapi=format=nv12:out_color_matrix=smpte170m:out_range=tv");
+        assert_eq!(vaapi_filter(Some((1280,720))), "hwupload,scale_vaapi=w=1280:h=720:format=nv12:out_color_matrix=smpte170m:out_range=tv");
         let options = vaapi_options(&VideoSettings::default(), "30");
         for pair in [["-g","30"], ["-bf","0"], ["-async_depth","1"], ["-aud","1"]] {
             assert!(options.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]));
