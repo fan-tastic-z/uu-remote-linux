@@ -23,6 +23,11 @@ pub const MUTE_RESTORE: u64 = 16;
 pub const MUTE_PERMANENT: u64 = 17;
 pub const MUTE_TEMPORARY: u64 = 18;
 pub const SET_AUTO_LOCK: u64 = 19;
+/// The viewer's 声音 menu (ACTION_TYPE_SPEAKER_OPENED/CLOSED, same order in the official
+/// host's enum and in control_protocol::simple_action_name): hearing the host's desktop
+/// sound on and off. Session-scoped, not a persisted 安全 setting.
+pub const SPEAKER_OPENED: u64 = 25;
+pub const SPEAKER_CLOSED: u64 = 26;
 
 /// Host settings from the viewer's 安全 menu. The viewer sends them only when a switch is toggled
 /// and shows what SystemMetrics reports, so they are host-wide and persisted (like the official
@@ -214,6 +219,12 @@ impl PeerActions {
         match action {
             SHOW_DESKTOP => { show_desktop(); log::info!("System action show_desktop"); return false }
             LOCK_SYSTEM => { log::info!("System action lock_system: ok={}", lock_session()); return false }
+            SPEAKER_OPENED | SPEAKER_CLOSED => {
+                let on = action == SPEAKER_OPENED;
+                crate::audio::set_speaker(on);
+                log::info!("System action speaker_{}: desktop audio {}", if on { "opened" } else { "closed" }, if on { "resumes" } else { "pauses" });
+                return false
+            }
             SHOW_TASKMGR => {
                 let ok = detached("gnome-system-monitor", &[]) || detached("plasma-systemmonitor", &[]) || detached("xfce4-taskmanager", &[]);
                 log::info!("System action show_taskmgr: ok={}", ok); return false

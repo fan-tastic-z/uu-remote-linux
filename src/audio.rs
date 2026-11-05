@@ -20,6 +20,14 @@ const FRAME: Duration = Duration::from_millis(20);
 
 pub fn enabled() -> bool { std::env::var("UU_AUDIO").map_or(true, |v| v != "0") }
 
+/// The viewer's 声音 menu speaker switch (SimpleAction 25 speaker_opened / 26
+/// speaker_closed, enum confirmed against the official host's ACTION_TYPE_*): pauses and
+/// resumes the desktop-audio encoder mid-session. On until the viewer turns it off; a new
+/// connection starts on. One desktop connection at a time, so one process-wide flag.
+static SPEAKER: AtomicBool = AtomicBool::new(true);
+pub fn set_speaker(on: bool) { SPEAKER.store(on, Ordering::Relaxed); }
+pub fn speaker_on() -> bool { SPEAKER.load(Ordering::Relaxed) }
+
 /// Stops one running encoder when dropped: sets the in-process stop flag, or kills the FFmpeg child.
 struct Stopper { stop: Arc<AtomicBool>, child: Option<Child> }
 impl Drop for Stopper {
@@ -140,6 +148,11 @@ pub async fn stream_audio(pc: Arc<RTCPeerConnection>, track: Arc<TrackLocalStati
     }
     let mut failures = 0u32;
     while !closed(&pc) {
+        // The viewer's speaker switch is off: hold without an encoder until it comes back.
+        while !closed(&pc) && !speaker_on() {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        if closed(&pc) { break; }
         let source = crate::virtual_audio::source();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(25);
         let (stopper, job) = match start(&source, tx) {
@@ -158,7 +171,14 @@ pub async fn stream_audio(pc: Arc<RTCPeerConnection>, track: Arc<TrackLocalStati
                     }
                     packets += 1;
                 },
-                _ = health.tick() => if closed(&pc) || crate::virtual_audio::source() != source { break },
+                _ = health.tick() => {
+                    if closed(&pc) { break; }
+                    if !speaker_on() {
+                        log::info!("Desktop audio paused: speaker switch off");
+                        break;
+                    }
+                    if crate::virtual_audio::source() != source { break; }
+                }
             }
         }
         // Dropping the receiver and the stopper ends the encoder at its next packet.
@@ -166,7 +186,7 @@ pub async fn stream_audio(pc: Arc<RTCPeerConnection>, track: Arc<TrackLocalStati
         drop(stopper);
         let result = job.await.unwrap_or_else(|e| Err(e.to_string()));
         if closed(&pc) { break; }
-        if crate::virtual_audio::source() != source { failures=0; continue; }
+        if !speaker_on() || crate::virtual_audio::source() != source { failures=0; continue; }
         log::warn!("Desktop audio stopped after {packets} packets: {:?}", result.err());
         failures = if packets > 250 { 0 } else { failures + 1 };
         if failures >= 5 { log::warn!("Desktop audio disabled for this connection"); return; }

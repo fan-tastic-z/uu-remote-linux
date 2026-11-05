@@ -1391,7 +1391,8 @@ impl WebRtcSession {
                                         }
                                         use crate::system_actions as sa;
                                         if matches!(action, sa::SHOW_DESKTOP | sa::REBOOT_SYSTEM | sa::LOCK_SYSTEM | sa::SHUTDOWN_SYSTEM | sa::SHOW_TASKMGR
-                                            | sa::MUTE_SYSTEM | sa::MUTE_RESTORE | sa::MUTE_PERMANENT | sa::MUTE_TEMPORARY | sa::SET_AUTO_LOCK) {
+                                            | sa::MUTE_SYSTEM | sa::MUTE_RESTORE | sa::MUTE_PERMANENT | sa::MUTE_TEMPORARY | sa::SET_AUTO_LOCK
+                                            | sa::SPEAKER_OPENED | sa::SPEAKER_CLOSED) {
                                             let value = action_fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Varint(v), 5) => Some(*v), _ => None });
                                             let args = action_fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Bytes(v), 2) => Some(v.to_vec()), _ => None }).unwrap_or_default();
                                             log::info!("SimpleAction {} ({}) received: value={:?} args={}", action,
