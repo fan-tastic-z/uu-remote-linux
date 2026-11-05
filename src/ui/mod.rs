@@ -33,9 +33,9 @@ static PREVIEW: AtomicBool = AtomicBool::new(false);
 /// on it — a process exits when `main` returns, which would kill the fresh window.
 static UI_EXIT: Mutex<Option<mpsc::Receiver<()>>> = Mutex::new(None);
 
-/// The sections the window opened with (service: both cards; `login`: account only).
+/// The sections the window opened with (service: every card; `login`: account only).
 pub(crate) fn initial_sections() -> state::Sections {
-    *INITIAL_SECTIONS.get().unwrap_or(&state::Sections { assist: true, account: true })
+    *INITIAL_SECTIONS.get().unwrap_or(&state::Sections { assist: true, account: true, settings: true })
 }
 
 thread_local! {
@@ -55,20 +55,20 @@ pub(crate) fn run_on_ui_thread(f: impl FnOnce() + Send + 'static) {
 /// without the host service. Blocks until the window closes.
 pub fn preview() {
     PREVIEW.store(true, Ordering::SeqCst);
-    let _ = start_with(state::Sections { assist: true, account: true }, false, false);
+    let _ = start_with(state::Sections { assist: true, account: true, settings: true }, false, false);
     // main must not return while the window is up (that would kill the UI thread).
     let exit = UI_EXIT.lock().ok().and_then(|mut slot| slot.take());
     if let Some(exit) = exit { let _ = exit.recv(); }
 }
 
-/// The assist host window (service: both cards, `hidden` until `present`).
+/// The assist host window (service: every card, `hidden` until `present`).
 pub fn start(hidden: bool, hide_on_close: bool) -> bool {
-    start_with(state::Sections { assist: true, account: true }, hidden, hide_on_close)
+    start_with(state::Sections { assist: true, account: true, settings: true }, hidden, hide_on_close)
 }
 
 /// Standalone `login`: the account card only; closing the window stops it.
 pub fn start_login() -> bool {
-    start_with(state::Sections { assist: false, account: true }, false, false)
+    start_with(state::Sections { assist: false, account: true, settings: false }, false, false)
 }
 
 fn start_with(sections: state::Sections, hidden: bool, hide_on_close: bool) -> bool {
@@ -96,6 +96,9 @@ fn start_with(sections: state::Sections, hidden: bool, hide_on_close: bool) -> b
             error: false,
         }));
         state::apply(state::Patch::Qr(bridge::qr_png_uri(preview_qr_pixels(), PREVIEW_QR_EDGE)));
+        state::apply(state::Patch::Settings(settings_snapshot()));
+    } else {
+        state::apply(state::Patch::Settings(settings_snapshot()));
     }
     let (tx, rx) = mpsc::channel::<bool>();
     let (exit_tx, exit_rx) = mpsc::channel::<()>();
@@ -218,6 +221,45 @@ pub(crate) fn copy_to_clipboard(value: &str) {
             window.clipboard().set_text(value);
         }
     });
+}
+
+/// The stored preferences plus the effective selection, for the 设置 card.
+pub(crate) fn settings_snapshot() -> state::Settings {
+    use crate::video_select::{self, CodecPref};
+    let stored = crate::system_actions::load_settings();
+    let selection = video_select::selection();
+    let codec = match selection.codec_pref {
+        CodecPref::Auto => "auto",
+        CodecPref::H264 => "h264",
+        CodecPref::H265 => "h265",
+    };
+    state::Settings {
+        encoder_pref: stored.video_encoder.clone(),
+        codec_pref: stored.video_codec.clone(),
+        encoder_effective: format!(
+            "{} · {}",
+            format!("{:?}", selection.encoder).to_ascii_lowercase(),
+            video_select::encoder_source_label(selection.encoder_source),
+        ),
+        codec_effective: format!("{} · {}", codec, video_select::source_label(selection.codec_source)),
+    }
+}
+
+/// Writes one video preference (the same file `set-encoder`/`set-codec` edit), switches
+/// live desktop streams the way the SIGUSR2 handler does, and refreshes the card. Runs
+/// on the engine thread from a picker tap.
+pub(crate) fn store_video_pref(encoder: bool, value: &str) {
+    let write = crate::system_actions::merge_save(|settings| {
+        if encoder { settings.video_encoder = Some(value.to_owned()); }
+        else { settings.video_codec = Some(value.to_owned()); }
+    });
+    match write {
+        Ok(_) => {
+            crate::video_select::publish_reload();
+            state::apply(state::Patch::Settings(settings_snapshot()));
+        }
+        Err(error) => log::warn!("storing video preference {value} failed: {error}"),
+    }
 }
 
 pub fn closed() -> bool {

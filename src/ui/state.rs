@@ -62,11 +62,23 @@ pub fn take_command() -> Option<Command> {
     QUEUE.lock().ok().and_then(|mut queue| queue.pop_front())
 }
 
-/// Which cards the window shows: the host service shows both; `login` starts with the account.
+/// Which cards the window shows: the host service shows all; `login` starts with the account.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Sections {
     pub assist: bool,
     pub account: bool,
+    pub settings: bool,
+}
+
+/// The 设置 card: the stored encoder/codec preference and the effective selection a
+/// desktop stream would use now (e.g. "vaapi · setting").
+#[derive(Clone, Default, PartialEq)]
+pub struct Settings {
+    /// The stored preference; `None` is 自动 (falls through to environment/auto).
+    pub encoder_pref: Option<String>,
+    pub codec_pref: Option<String>,
+    pub encoder_effective: String,
+    pub codec_effective: String,
 }
 
 /// The 本设备 card.
@@ -109,6 +121,8 @@ pub enum Patch {
     Sections(Sections),
     /// The login QR's data URI (`None`: back to the placeholder pad).
     Qr(Option<String>),
+    /// The whole 设置 card (stored prefs + effective selection).
+    Settings(Settings),
     /// Reveals the 本设备 card (a second `start`).
     ShowAssist,
     /// Reveals the 账号 card (login attached to the running window).
@@ -122,6 +136,7 @@ pub(crate) struct Handles {
     pub problem: Signal<Problem>,
     pub sections: Signal<Sections>,
     pub qr: Signal<Qr>,
+    pub settings: Signal<Settings>,
 }
 
 thread_local! {
@@ -155,6 +170,7 @@ pub(crate) fn apply_now(patch: Patch) {
             Patch::Account(account) => h.account.set(account),
             Patch::Problem(text) => h.problem.set(Problem { text }),
             Patch::Qr(uri) => h.qr.set(Qr { uri }),
+            Patch::Settings(settings) => h.settings.set(settings),
             Patch::Sections(sections) => h.sections.set(sections),
             Patch::ShowAssist => h.sections.update(|s| s.assist = true),
             Patch::ShowAccount => h.sections.update(|s| s.account = true),
@@ -221,6 +237,12 @@ impl Problem {
 }
 
 impl Qr {
+    pub fn get() -> Self {
+        global::<Self>().with(Clone::clone)
+    }
+}
+
+impl Settings {
     pub fn get() -> Self {
         global::<Self>().with(Clone::clone)
     }

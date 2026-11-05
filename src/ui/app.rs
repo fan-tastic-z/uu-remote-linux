@@ -22,6 +22,7 @@ pub fn HostApp() -> impl IntoElement {
         problem: global::<state::Problem>(),
         sections: global::<state::Sections>(),
         qr: global::<state::Qr>(),
+        settings: global::<state::Settings>(),
     });
     // The engine defaults every section to hidden; equal writes do not notify.
     state::apply_now(state::Patch::Sections(super::initial_sections()));
@@ -36,6 +37,7 @@ pub fn HostApp() -> impl IntoElement {
                 .child(problem_banner())
                 .child(when(move || state::Sections::get().assist, device_card))
                 .child(when(move || state::Sections::get().account, account_card))
+                .child(when(move || state::Sections::get().settings, settings_card))
                 .child(footer()),
         )
 }
@@ -254,6 +256,77 @@ fn signed_out_flow() -> impl IntoElement {
 fn footer() -> impl IntoElement {
     text(s("开源 Linux 被控端 · 非网易官方客户端", "Open-source Linux host · not an official NetEase client"))
         .text_color(move || theme().muted_foreground)
+}
+
+/// One picker choice: primary when it is the stored preference.
+fn pref_choice(zh: &'static str, en: &'static str, value: &'static str, encoder: bool) -> impl IntoElement {
+    button()
+        .on_press(move || super::store_video_pref(encoder, value))
+        .active(|style| style.opacity(0.6))
+        .child(text(s(zh, en)).text_color(move || {
+            let settings = state::Settings::get();
+            let current = if encoder { settings.encoder_pref } else { settings.codec_pref };
+            if current.as_deref().unwrap_or("auto") == value { theme().primary } else { theme().muted_foreground }
+        }))
+}
+
+fn settings_card() -> impl IntoElement {
+    card()
+        .p_4()
+        .gap_3()
+        .child(
+            text(s("设置", "Settings"))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(move || theme().foreground),
+        )
+        .child(
+            view().flex_row().items_center().gap_2()
+                .child(key("视频编码器"))
+                .child(view().flex_1())
+                .child(pref_choice("自动", "Auto", "auto", true))
+                .child(pref_choice("CPU", "CPU", "cpu", true))
+                .child(pref_choice("VAAPI", "VAAPI", "vaapi", true))
+                .child(pref_choice("NVENC", "NVENC", "nvenc", true)),
+        )
+        .child(
+            text(move || format!("{}: {}", s("当前生效", "Effective"), state::Settings::get().encoder_effective))
+                .text_color(move || theme().muted_foreground),
+        )
+        .child(
+            view().flex_row().items_center().gap_2()
+                .child(key("视频编码"))
+                .child(view().flex_1())
+                .child(pref_choice("自动", "Auto", "auto", false))
+                .child(pref_choice("H.264", "H.264", "h264", false))
+                .child(pref_choice("H.265", "H.265", "h265", false)),
+        )
+        .child(
+            text(move || format!("{}: {}", s("当前生效", "Effective"), state::Settings::get().codec_effective))
+                .text_color(move || theme().muted_foreground),
+        )
+        .child(
+            view().flex_row().items_center().gap_3().mt_2()
+                .child(key("诊断"))
+                .child(view().flex_1())
+                .child(
+                    // The subcommand's report is paste-safe by design (booleans, names,
+                    // versions); a child process keeps the engine thread free.
+                    button()
+                        .on_press(|| {
+                            std::thread::spawn(|| {
+                                let report = std::process::Command::new("/proc/self/exe").arg("doctor").output()
+                                    .ok()
+                                    .filter(|output| output.status.success())
+                                    .map(|output| String::from_utf8_lossy(&output.stdout).into_owned());
+                                if let Some(report) = report {
+                                    super::run_on_ui_thread(move || super::copy_to_clipboard(&report));
+                                }
+                            });
+                        })
+                        .active(|style| style.opacity(0.6))
+                        .child(text(s("复制报告", "Copy report")).text_color(move || theme().primary)),
+                ),
+        )
 }
 
 /// The ID is copied without the display spaces, so it pastes into the viewer's ID field.
