@@ -25,6 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/fan-tastic-z/uu-remote-linux/omarch
 | 方向 | 内容 |
 |---|---|
 | 主窗口 | `nsh-ui` feature：nsh/GTK4 原生窗口替换 GTK3 C 窗口，实时跟随 Omarchy 主题换色（含 GTK 窗框）、卡片滚动、系统托盘（quickshell）图标 + 右键菜单（打开主窗口 / 退出）、应用启动器入口与「显示窗口」子命令 |
+| 控制端 | 主窗口「我的设备」卡片列出账号设备（在线状态、预览缩略图），连接 / 观看 / 断开一键拉起实验性 `uuremote-viewer` 桌面会话（随包安装；远程桌面窗口为独立进程，崩溃不影响被控服务） |
 | Hyprland 集成 | 虚拟显示器（headless output，`hyprctl eval`）、屏幕旋转（RPC 22）、应用列表（RPC 23/24，systemd-run 启动）、144fps 档 |
 | 视频编码 | `--features inproc-av` 进程内 NVENC/VAAPI；CPU 编码器只接受 ≤1080p 的 H.265 请求；VAAPI 硬件转换显著降 CPU |
 | 稳定性 | 扫码登录长轮询超时自动重试，二维码不再假性「已失效」 |

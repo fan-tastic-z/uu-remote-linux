@@ -27,6 +27,7 @@ for GNOME/KDE/X11 use the upstream release.
 | Area | What it adds |
 |---|---|
 | Main window | `nsh-ui` feature: an nsh/GTK4 native window replaces the GTK3 C window, follows the Omarchy theme live (GTK chrome included), scrolls its card column, and brings a quickshell tray icon with a right-click menu (open window / quit) plus a launcher entry and a `show` subcommand |
+| Controller | a 我的设备 (my devices) card lists the account's devices (online state, preview thumbnails); connect / watch / disconnect launch experimental `uuremote-viewer` desktop sessions (shipped in the package; each remote-desktop window is its own process, so a viewer crash never touches the host service) |
 | Hyprland | virtual display (headless output via `hyprctl eval`), screen rotation (RPC 22), app list (RPC 23/24, launched through systemd-run), a 144 fps preset |
 | Video encoding | `--features inproc-av` in-process NVENC/VAAPI; CPU encoders only accept H.265 requests up to 1080p; VAAPI hardware conversion cuts CPU sharply |
 | Stability | the QR-login status long poll retries on client timeout instead of faking an expired code |
