@@ -22,6 +22,10 @@ mod login;
 mod login_ui;
 #[cfg(all(feature = "nsh-ui", target_os = "linux"))]
 mod ui;
+// The 我的设备 card's account/session API; the SDL desktop window and GTK3 tool windows
+// stay in the separate `uuremote-viewer` binary (their GTK3 C unit is skipped under nsh-ui).
+#[cfg(all(feature = "nsh-ui", feature = "native-viewer", target_os = "linux"))]
+mod viewer;
 mod session_lock;
 mod capture;
 mod kms;
@@ -797,6 +801,11 @@ async fn serve(mut capture: Arc<ScreenCapture>, input: Arc<InputInjector>, shutd
                     present_on_usr1(session.ui());
                     if std::env::var("UU_SHOW_WINDOW").ok().as_deref() == Some("1") { session.ui().present(); }
                     std::env::remove_var("UU_SHOW_WINDOW");
+                    // 我的设备: poll the account's device list for the window and run one
+                    // detached uuremote-viewer child per remote session (dies with the runtime;
+                    // children survive, like the launcher's).
+                    #[cfg(all(feature = "nsh-ui", feature = "native-viewer", target_os = "linux"))]
+                    ui::devices::start();
                     log::info!("Remote assistance ready on the logged-in host (window: uuremote-server show)");
                     *assist = Some(session);
                 }

@@ -37,7 +37,9 @@ async fn run(args:&[String])->Result<(),String> {
             let executable=std::env::current_exe().map_err(|_|"Cannot locate companion login binary")?.with_file_name("uuremote-server");
             login_command(&executable,&args[1..]).await
         }
-        #[cfg(uu_gtk)]
+        // The GTK3 launcher needs the C window unit, which the nsh-ui build skips (the nsh
+        // host window serves the same device list there).
+        #[cfg(all(uu_gtk, not(feature = "nsh-ui")))]
         Some("ui") if args.len()==1=> viewer::ui::run(credentials).await,
         Some("devices-shape") if args.len()==2=> {
             let method=match args[1].as_str(){"GET"=>reqwest::Method::GET,"POST"=>reqwest::Method::POST,_=>return Err("Device list method must be GET or POST".into())};
@@ -259,7 +261,7 @@ mod cli_tests {
 async fn tool_command(args:&[String])->Result<(),String>{
     let capture=match args[0].as_str(){"terminal" if args.len()==2 || args.len()==3=>8,"terminal-ui" if args.len()==3=>8,"files" if (args.len()==4 && args[2]=="ls") || (args.len()==5 && ["get","put"].contains(&args[2].as_str()))=>5,"portmap" if args.len()==5=>9,"files-ui" if args.len()==3=>5,"portmap-ui" if args.len()==3=>9,_=>return Err(HELP.into())};
     let terminal_session=if args[0]=="terminal" && args.len()==3{Some(args[2].parse::<u32>().ok().filter(|n|*n!=0).ok_or("Invalid terminal session id")?)}else{None};
-    #[cfg(not(uu_gtk))] if args[0].ends_with("-ui"){return Err("Tool windows require the GTK build".into())}
+    #[cfg(any(not(uu_gtk), feature = "nsh-ui"))] if args[0].ends_with("-ui"){return Err("Tool windows require the GTK build".into())}
     let ports=if args[0]=="portmap"{Some((args[2].parse::<u16>().map_err(|_|"Invalid local port")?,args[4].parse::<u16>().map_err(|_|"Invalid target port")?))}else{None};
     if ports.is_some_and(|(_,port)|port==0) || (args[0]=="portmap" && args[3].trim().is_empty()){return Err("Invalid forwarding target".into())}
     let mut shape:Shape=serde_json::from_str(DEFAULT_SHAPE).map_err(|_|"Invalid built-in tool shape")?;
@@ -277,9 +279,9 @@ async fn tool_command(args:&[String])->Result<(),String>{
         };
         tokio::time::timeout(Duration::from_secs(30),ready).await.map_err(|_|"Tool connection timed out")??;
         let operation=async{match args[0].as_str(){"terminal"=>viewer::tools::cli::terminal(io,rx,terminal_session).await,"files"=>viewer::tools::cli::files(io,rx,&args[2..]).await,
-            #[cfg(uu_gtk)] "terminal-ui"=>viewer::tools_ui::terminal(io,rx,&args[1],&args[2]).await,
-            #[cfg(uu_gtk)] "files-ui"=>viewer::tools_ui::files(io,rx,&args[2]).await,
-            #[cfg(uu_gtk)] "portmap-ui"=>viewer::tools_ui::portmap(io,rx,&args[2]).await,
+            #[cfg(all(uu_gtk, not(feature = "nsh-ui")))] "terminal-ui"=>viewer::tools_ui::terminal(io,rx,&args[1],&args[2]).await,
+            #[cfg(all(uu_gtk, not(feature = "nsh-ui")))] "files-ui"=>viewer::tools_ui::files(io,rx,&args[2]).await,
+            #[cfg(all(uu_gtk, not(feature = "nsh-ui")))] "portmap-ui"=>viewer::tools_ui::portmap(io,rx,&args[2]).await,
             "portmap"=>{let(local,port)=ports.unwrap();viewer::tools::cli::portmap(io,rx,local,&args[3],port).await}
             _=>Err("Tool windows require the GTK build".into())}};
         tokio::pin!(operation);

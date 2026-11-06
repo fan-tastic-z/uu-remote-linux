@@ -530,7 +530,7 @@ pub async fn run(session:&mut Session,window:&mut Window,decoder:&mut dyn super:
                 }
                 window.poll_clipboard();
                 requested|=std::mem::take(&mut window.files);
-                #[cfg(uu_gtk)] {
+                #[cfg(all(uu_gtk, not(feature = "nsh-ui")))] {
                     if files.as_ref().is_some_and(|f|f.is_finished()){
                         if let Some(f)=files.take(){let _=f.await;}session.peer.tools.lock().unwrap().take();
                     }
@@ -542,7 +542,8 @@ pub async fn run(session:&mut Session,window:&mut Window,decoder:&mut dyn super:
                         requested=false;
                     }
                 }
-                #[cfg(not(uu_gtk))] {if requested{log::warn!("File window requires GTK3");requested=false;}}
+                // The nsh-ui build skips the GTK3 C unit the tool windows live in.
+                #[cfg(any(not(uu_gtk), feature = "nsh-ui"))] {if requested{log::warn!("File window requires GTK3");requested=false;}}
                                 if type_requested {
                     type_requested=false;
                     if type_job.is_some() {
@@ -588,7 +589,7 @@ pub async fn run(session:&mut Session,window:&mut Window,decoder:&mut dyn super:
         }}
     }.await;
     if let Some(frame)=window.last_frame.as_ref() {if let Err(e)=super::thumbs::save(device,frame){log::debug!("Viewer thumbnail not saved: {e}");}}
-    #[cfg(uu_gtk)] if let Some(f)=files {f.abort();let _=f.await;super::tools_ui::hide();session.peer.tools.lock().unwrap().take();}
+    #[cfg(all(uu_gtk, not(feature = "nsh-ui")))] if let Some(f)=files {f.abort();let _=f.await;super::tools_ui::hide();session.peer.tools.lock().unwrap().take();}
     if let Some(t)=type_ipc {t.abort();let _=t.await;}
     if let Some(pad)=native_gamepad.as_mut(){for m in pad.close(){
         let _=tokio::time::timeout(std::time::Duration::from_millis(300),session.peer.send_input(&m)).await;

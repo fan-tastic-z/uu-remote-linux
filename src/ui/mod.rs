@@ -11,6 +11,8 @@
 
 pub mod app;
 mod bridge;
+#[cfg(feature = "native-viewer")]
+pub(crate) mod devices;
 mod state;
 mod theme;
 mod tray;

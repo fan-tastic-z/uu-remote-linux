@@ -98,6 +98,28 @@ pub struct Account {
     pub error: bool,
 }
 
+/// One row of the 我的设备 card: an account device the user can connect out to.
+/// Names and ids go to the window only, never into a log.
+#[derive(Clone, Default, PartialEq)]
+pub struct DeviceRow {
+    pub id: String,
+    pub name: String,
+    pub online: bool,
+    /// This machine itself (shown with a badge; no connect button).
+    pub current: bool,
+    /// The cached launcher preview as a `data:image/png;base64` URI.
+    pub thumb: Option<String>,
+    /// A live `uuremote-viewer` session exists for this device.
+    pub running: bool,
+    pub error: String,
+}
+
+/// The 我的设备 card (empty until the host's first successful device-list fetch).
+#[derive(Clone, Default, PartialEq)]
+pub struct Devices {
+    pub list: Vec<DeviceRow>,
+}
+
 /// A problem only the person at the desktop can fix (`None`: none).
 #[derive(Clone, Default, PartialEq)]
 pub struct Problem {
@@ -123,6 +145,10 @@ pub enum Patch {
     Qr(Option<String>),
     /// The whole 设置 card (stored prefs + effective selection).
     Settings(Settings),
+    /// The whole 我的设备 list (fetched by the host-side poll).
+    Devices(Vec<DeviceRow>),
+    /// One device's session state: running and/or the last failure line.
+    Session { id: String, running: Option<bool>, error: Option<String> },
     /// Reveals the 本设备 card (a second `start`).
     ShowAssist,
     /// Reveals the 账号 card (login attached to the running window).
@@ -137,6 +163,7 @@ pub(crate) struct Handles {
     pub sections: Signal<Sections>,
     pub qr: Signal<Qr>,
     pub settings: Signal<Settings>,
+    pub devices: Signal<Devices>,
 }
 
 thread_local! {
@@ -171,6 +198,13 @@ pub(crate) fn apply_now(patch: Patch) {
             Patch::Problem(text) => h.problem.set(Problem { text }),
             Patch::Qr(uri) => h.qr.set(Qr { uri }),
             Patch::Settings(settings) => h.settings.set(settings),
+            Patch::Devices(list) => h.devices.set(Devices { list }),
+            Patch::Session { id, running, error } => h.devices.update(|devices| {
+                if let Some(row) = devices.list.iter_mut().find(|row| row.id == id) {
+                    if let Some(running) = running { row.running = running; }
+                    if let Some(error) = error { row.error = error; }
+                }
+            }),
             Patch::Sections(sections) => h.sections.set(sections),
             Patch::ShowAssist => h.sections.update(|s| s.assist = true),
             Patch::ShowAccount => h.sections.update(|s| s.account = true),
@@ -243,6 +277,12 @@ impl Qr {
 }
 
 impl Settings {
+    pub fn get() -> Self {
+        global::<Self>().with(Clone::clone)
+    }
+}
+
+impl Devices {
     pub fn get() -> Self {
         global::<Self>().with(Clone::clone)
     }

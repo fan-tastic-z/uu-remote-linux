@@ -13,12 +13,14 @@ pub mod input;
 pub mod desktop;
 #[cfg(feature="viewer-ffmpeg")] pub mod decoder;
 #[cfg(any(test,feature="viewer-sdl"))] pub mod decoder_cli;
-#[cfg(uu_gtk)] pub mod ui;
-#[cfg(uu_gtk)] pub mod tools_ui;
+// The GTK3 window modules link the C unit build.rs skips under `nsh-ui` (the nsh/GTK4 window
+// replaces it; its bridge resolves only the assist/login symbols).
+#[cfg(all(uu_gtk, not(feature = "nsh-ui")))] pub mod ui;
+#[cfg(all(uu_gtk, not(feature = "nsh-ui")))] pub mod tools_ui;
 #[cfg(feature="viewer-sdl")] pub mod sdl;
 #[cfg(feature="viewer-sdl")] pub mod hud;
 pub mod thumbs;
-#[cfg(uu_gtk)] pub mod host;
+#[cfg(all(uu_gtk, not(feature = "nsh-ui")))] pub mod host;
 
 pub mod tools;
 pub mod native_gamepad;

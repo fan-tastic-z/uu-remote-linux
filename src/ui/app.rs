@@ -23,6 +23,7 @@ pub fn HostApp() -> impl IntoElement {
         sections: global::<state::Sections>(),
         qr: global::<state::Qr>(),
         settings: global::<state::Settings>(),
+        devices: global::<state::Devices>(),
     });
     // The engine defaults every section to hidden; equal writes do not notify.
     state::apply_now(state::Patch::Sections(super::initial_sections()));
@@ -41,6 +42,7 @@ pub fn HostApp() -> impl IntoElement {
                         .child(problem_banner())
                         .child(when(move || state::Sections::get().assist, device_card))
                         .child(when(move || state::Sections::get().account, account_card))
+                        .child(when(move || state::Account::get().user.is_some(), my_devices_card))
                         .child(when(move || state::Sections::get().settings, settings_card))
                         .child(footer()),
                 ),
@@ -158,8 +160,126 @@ fn device_card() -> impl IntoElement {
         )
 }
 
-fn account_card() -> impl IntoElement {
+/// Without `native-viewer` the card collapses to nothing (the when() slot needs a symbol).
+#[cfg(not(feature = "native-viewer"))]
+fn my_devices_card() -> impl IntoElement {
+    view()
+}
+
+/// The 我的设备 card: the account's devices; 连接 spawns a detached `uuremote-viewer`
+/// desktop session (`native-viewer` builds). Names are UI-only, never logged. Rows are
+/// keyed by device id through `each`, so a row keeps its nodes and follows its item.
+#[cfg(feature = "native-viewer")]
+fn my_devices_card() -> impl IntoElement {
     card()
+        .p_4()
+        .gap_2()
+        .child(
+            text(s("我的设备", "My devices"))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(move || theme().foreground),
+        )
+        .child(view().gap_2().child(each(
+            move || state::Devices::get().list,
+            |row: &state::DeviceRow| row.id.clone(),
+            |item: ReadSignal<state::DeviceRow>, _index| device_row_view(item),
+        )))
+}
+
+/// One device row: cached preview (or the name's first glyph), name + 在线 state, and the
+/// connect / watch / disconnect buttons. The local machine shows a 本机 badge instead.
+/// Actions capture an id snapshot; everything shown reads the row's signal reactively.
+#[cfg(feature = "native-viewer")]
+fn device_row_view(item: ReadSignal<state::DeviceRow>) -> impl IntoElement {
+    let snapshot = item.get();
+    let id = snapshot.id.clone();
+    let name = snapshot.name.clone();
+    view()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .child(
+            view()
+                .w(px(32.0))
+                .h(px(32.0))
+                .rounded(px(16.0))
+                .bg(move || theme().selection())
+                .items_center()
+                .justify_center()
+                .child(when(move || item.get().thumb.is_some(), move || {
+                    image(move || item.get().thumb.clone().unwrap_or_default())
+                        .w(px(32.0))
+                        .h(px(32.0))
+                        .rounded(px(16.0))
+                }))
+                .child(when(move || item.get().thumb.is_none(), move || {
+                    text(move || item.get().name.chars().next().map(String::from).unwrap_or_default())
+                        .text_color(move || theme().muted_foreground)
+                })),
+        )
+        .child(
+            view()
+                .flex_1()
+                .gap_1()
+                .child(
+                    text(move || {
+                        let row = item.get();
+                        if row.current {
+                            format!("{} · {}", row.name, s("本机", "this device"))
+                        } else {
+                            row.name.clone()
+                        }
+                    })
+                    .text_color(move || theme().foreground),
+                )
+                .child(
+                    // The connect state while live, else the online dot; a failure line
+                    // replaces both in the destructive color.
+                    text(move || {
+                        let row = item.get();
+                        if !row.error.is_empty() { row.error.clone() }
+                        else if row.running { s("会话进行中", "Session running").to_owned() }
+                        else if row.online { s("在线", "Online").to_owned() }
+                        else { s("离线", "Offline").to_owned() }
+                    })
+                    .text_color(move || {
+                        if !item.get().error.is_empty() { theme().destructive } else { theme().muted_foreground }
+                    }),
+                ),
+        )
+        .child(when(move || !item.get().current, move || {
+            // The when bodies are `Fn` (re-run on flip): own copies per element build.
+            let (connect_id, connect_name) = (id.clone(), name.clone());
+            let disconnect_id = id.clone();
+            view()
+                .flex_row()
+                .gap_2()
+                .child(when(move || !item.get().running, move || {
+                    view().flex_row().gap_2()
+                        .child(small_action(&connect_id, &connect_name, false, "连接", "Connect"))
+                        .child(small_action(&connect_id, &connect_name, true, "观看", "Watch"))
+                }))
+                .child(when(move || item.get().running, move || {
+                    let disconnect_id = disconnect_id.clone();
+                    button()
+                        .on_press(move || super::devices::request_disconnect(&disconnect_id))
+                        .active(|style| style.opacity(0.6))
+                        .child(text(s("断开", "Disconnect")).text_color(move || theme().destructive))
+                }))
+        }))
+}
+
+/// A compact per-device action button.
+#[cfg(feature = "native-viewer")]
+fn small_action(id: &str, name: &str, watch: bool, zh: &'static str, en: &'static str) -> impl IntoElement {
+    let (id, name) = (id.to_owned(), name.to_owned());
+    button()
+        .on_press(move || super::devices::request_connect(&id, &name, watch))
+        .active(|style| style.opacity(0.6))
+        .child(text(s(zh, en)).text_color(move || theme().primary))
+}
+
+fn account_card() -> impl IntoElement {    card()
         .p_4()
         .gap_3()
         .child(
