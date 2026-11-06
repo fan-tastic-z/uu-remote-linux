@@ -67,55 +67,55 @@ fn parse_colors(text: &str) -> HashMap<String, String> {
     out
 }
 
-/// Linear mix of two `#rrggbb` colors toward `to` by `t` (0..1), as `#rrggbb`.
-fn mix(from: &str, to: &str, t: f32) -> String {
-    let channel = |a: u8, b: u8| a as f32 + (b as f32 - a as f32) * t;
-    let (a, b) = (hex(from), hex(to));
-    let (r, g, bch) = (
-        channel(a[0], b[0]).round() as u8,
-        channel(a[1], b[1]).round() as u8,
-        channel(a[2], b[2]).round() as u8,
-    );
-    format!("#{r:02x}{g:02x}{bch:02x}")
-}
 
-fn hex(color: &str) -> [u8; 3] {
-    let value = u32::from_str_radix(&color[1..], 16).unwrap_or(0xffffff);
-    [(value >> 16) as u8, (value >> 8) as u8, value as u8]
-}
-
-/// The palette of `colors.toml` text as shadcn cssVars. `None` when the file has no
-/// `background` (not a usable palette; the caller falls back to the default theme).
+/// The palette of `colors.toml` text as shadcn cssVars. `None` when the file lacks
+/// `background` or `foreground` (not a usable palette; the caller falls back to the default).
+/// Every token is derived from the theme's own keys — nothing is hard-coded, so dark themes
+/// (Catppuccin: `lighter_background` is the raised card surface) and light ones (Rose Pine:
+/// it is the official surface layer) both map correctly. Tokens the palette does not define
+/// (chart colors) are omitted: nsh keeps its own defaults rather than a wrong color.
 fn overrides_from_colors(text: &str) -> Option<String> {
     let colors = parse_colors(text);
     let c = |key: &str| colors.get(key).cloned();
-    // Rose Pine Dawn's warm surface, for cards on the background without hard-coding a theme.
     let background = c("background")?;
-    let foreground = c("foreground").unwrap_or_else(|| "#575279".into());
-    let dark_background = c("dark_background").unwrap_or_else(|| background.clone());
-    let dark_foreground = c("dark_foreground").unwrap_or_else(|| foreground.clone());
-    let selection = c("selection").unwrap_or_else(|| dark_background.clone());
-    let muted = c("muted").unwrap_or_else(|| selection.clone());
+    let foreground = c("foreground")?;
+    // Omarchy key semantics: dark_background is one step deeper than the background (muted
+    // panels), lighter_background one step up (the card surface), dark_foreground is the
+    // dimmed secondary text — independent of the theme's own light/dark mode.
+    let muted = c("dark_background").unwrap_or_else(|| background.clone());
+    let card = c("lighter_background").unwrap_or_else(|| muted.clone());
+    let selection = c("selection").unwrap_or_else(|| muted.clone());
     let accent = c("accent").unwrap_or_else(|| selection.clone());
-    let red = c("red").unwrap_or_else(|| "#b4637a".into());
-    let card = mix(&background, "#fffaf3", 0.55);
-    let palette = serde_json::json!({
-        "background": background, "foreground": foreground,
-        "card": card, "card-foreground": foreground,
-        "popover": card, "popover-foreground": foreground,
-        "primary": accent, "primary-foreground": background,
-        "secondary": selection, "secondary-foreground": foreground,
-        "muted": dark_background, "muted-foreground": dark_foreground,
-        "accent": selection, "accent-foreground": foreground,
-        "destructive": red, "border": muted, "input": muted, "ring": accent,
-        "chart-1": c("blue").unwrap_or_else(|| accent.clone()),
-        "chart-2": c("yellow").unwrap_or_else(|| red.clone()),
-        "chart-3": c("green").unwrap_or_else(|| accent.clone()),
-        "chart-4": c("magenta").unwrap_or_else(|| foreground.clone()),
-        "chart-5": red,
-    });
+    // ... and the palette's own `muted` is its outline tone (borders, inputs).
+    let dimmed = c("dark_foreground").unwrap_or_else(|| foreground.clone());
+    let outline = c("muted").unwrap_or_else(|| muted.clone());
+    let mut palette = serde_json::Map::new();
+    let mut put = |k: &str, v: String| { palette.insert(k.into(), serde_json::Value::String(v)); };
+    put("background", background.clone());
+    put("foreground", foreground.clone());
+    put("card", card.clone());
+    put("card-foreground", foreground.clone());
+    put("popover", card);
+    put("popover-foreground", foreground.clone());
+    put("primary", accent.clone());
+    put("primary-foreground", background);
+    put("secondary", selection.clone());
+    put("secondary-foreground", foreground.clone());
+    put("muted", muted);
+    put("muted-foreground", dimmed);
+    put("accent", selection);
+    put("accent-foreground", foreground);
+    put("border", outline.clone());
+    put("input", outline);
+    put("ring", accent);
+    if let Some(red) = c("red") { put("destructive", red.clone()); put("chart-5", red); }
+    for (token, key) in [("chart-1", "blue"), ("chart-2", "yellow"), ("chart-3", "green"), ("chart-4", "magenta")] {
+        if let Some(color) = c(key) { put(token, color); }
+    }
+    let dark = serde_json::Value::Object(palette.clone());
+    let light = serde_json::Value::Object(palette);
     Some(serde_json::json!({
-        "cssVars": { "theme": { "radius": "10px" }, "light": palette, "dark": palette }
+        "cssVars": { "theme": { "radius": "10px" }, "light": light, "dark": dark }
     }).to_string())
 }
 
@@ -124,7 +124,7 @@ mod tests {
     use super::*;
 
     const ROSE_PINE_DAWN: &str = "\u{feff}mode = \"light\"\naccent = \"#56949f\"\nselection = \"#dfdad9\"\n\
-        muted = \"#cecacd\"\nbackground = \"#faf4ed\"\ndark_background = \"#ede7e1\"\n\
+        muted = \"#cecacd\"\nbackground = \"#faf4ed\"\ndark_background = \"#ede7e1\"\nlighter_background = \"#f2e9e1\"\n\
         foreground = \"#575279\"\ndark_foreground = \"#9893a5\"\nred = \"#b4637a\"\ngreen = \"#286983\"\n";
 
     #[test]
@@ -134,13 +134,42 @@ mod tests {
         let vars = &value["cssVars"]["light"];
         assert_eq!(vars["background"], "#faf4ed");
         assert_eq!(vars["primary"], "#56949f");
-        assert_eq!(vars["border"], "#cecacd");
+        assert_eq!(vars["primary-foreground"], "#faf4ed");
+        // The card is the theme's own surface layer, never a mix toward a fixed color.
+        assert_eq!(vars["card"], "#f2e9e1");
+        assert_eq!(vars["popover"], "#f2e9e1");
+        assert_eq!(vars["muted"], "#ede7e1");
         assert_eq!(vars["muted-foreground"], "#9893a5");
+        assert_eq!(vars["border"], "#cecacd");
+        assert_eq!(vars["input"], "#cecacd");
+        assert_eq!(vars["destructive"], "#b4637a");
+        // Chart colors come from the palette's own keys; missing ones keep nsh defaults.
+        assert_eq!(vars["chart-3"], "#286983");
+        assert_eq!(vars["chart-5"], "#b4637a");
+        assert!(vars["chart-1"].is_null());
         // The same palette serves the dark appearance.
         assert_eq!(value["cssVars"]["dark"], *vars);
-        // Card is a mix of the background and the warm surface, still warm.
-        assert!(vars["card"].as_str().unwrap().starts_with("#f"));
         assert_eq!(value["cssVars"]["theme"]["radius"], "10px");
+    }
+
+    #[test]
+    fn dark_themes_keep_dark_cards() {
+        // Catppuccin: surface0 (lighter_background) is the raised card on its dark
+        // background — nothing may lighten it back toward white.
+        let json = overrides_from_colors(
+            "background = \"#1e1e2e\"\nforeground = \"#cdd6f4\"\naccent = \"#89b4fa\"\n\
+             selection = \"#45475a\"\nmuted = \"#585b70\"\ndark_background = \"#161622\"\n\
+             lighter_background = \"#313244\"\ndark_foreground = \"#6c7086\"\nred = \"#f38ba8\"\n",
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let vars = &value["cssVars"]["dark"];
+        assert_eq!(vars["background"], "#1e1e2e");
+        assert_eq!(vars["card"], "#313244");
+        assert_eq!(vars["primary"], "#89b4fa");
+        assert_eq!(vars["primary-foreground"], "#1e1e2e");
+        assert_eq!(vars["border"], "#585b70");
+        assert_eq!(vars["muted-foreground"], "#6c7086");
     }
 
     #[test]
@@ -154,11 +183,5 @@ mod tests {
         let colors = parse_colors("mode = \"light\"\naccent = \"#56949f\"\nbroken = \"#12345\"\n");
         assert_eq!(colors.get("accent").map(String::as_str), Some("#56949f"));
         assert_eq!(colors.len(), 1);
-    }
-
-    #[test]
-    fn mix_moves_toward_the_target() {
-        assert_eq!(mix("#000000", "#ffffff", 0.5), "#808080");
-        assert_eq!(mix("#faf4ed", "#faf4ed", 0.5), "#faf4ed");
     }
 }
