@@ -67,6 +67,8 @@ if [ -n "$missing" ] && [ "$ffmpeg_install" = 1 ]; then
   fi
   case $ask in
     n*|N*) echo "Skipped ($missing); desktop video and the device list's connect button need them." ;;
+    # Unquoted on purpose: $missing holds space-separated package names.
+    # shellcheck disable=SC2086
     *) sudo pacman -S --needed --noconfirm $missing ;;
   esac
 fi
