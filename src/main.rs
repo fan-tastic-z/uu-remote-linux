@@ -50,6 +50,7 @@ mod audio;
 mod virtual_audio;
 mod virtual_display;
 mod flip_screen;
+mod app_list;
 mod privacy_screen;
 mod system_actions;
 mod annotation;
@@ -215,7 +216,7 @@ pub(crate) fn cli_pref_ok(which: &str, value: &str) -> bool {
     }
 }
 
-const SUBCOMMANDS: [&str; 23] = ["privacy-guard", "privacy-wallpaper", "privacy-screen-probe", "doctor", "show", "assist", "set-encoder", "set-codec", "desktop-input-probe", "virtual-audio-probe", "virtual-display-probe", "flip-probe", "login", "unlock-check", "desktop-probe", "desktop-video-probe", "desktop-audio-probe", "wayland-capture",
+const SUBCOMMANDS: [&str; 24] = ["privacy-guard", "privacy-wallpaper", "privacy-screen-probe", "doctor", "show", "assist", "set-encoder", "set-codec", "desktop-input-probe", "virtual-audio-probe", "virtual-display-probe", "flip-probe", "app-list-probe", "login", "unlock-check", "desktop-probe", "desktop-video-probe", "desktop-audio-probe", "wayland-capture",
     "wayland-input-probe", "wayland-text-probe", "clipboard-acceptance", "portal-acceptance", "ui-preview"];
 
 /// Unknown arguments and illegal set-encoder / set-codec values exit 2 (never start a second host).
@@ -635,6 +636,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if virtual_audio::active() { return Err("Virtual audio probe restore incomplete".into()); }
         println!("Virtual audio probe ended");
         return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("app-list-probe") {
+        if std::env::args().nth(2).as_deref() == Some("--launch") {
+            let key = std::env::args().nth(3).ok_or("missing app_key")?;
+            return app_list::launch_by_key(&key).map_err(|e| e.into());
+        }
+        return app_list::probe(std::env::args().nth(2).as_deref()).map_err(|e| e.into());
     }
     if std::env::args().nth(1).as_deref() == Some("flip-probe") {
         return flip_screen::probe().map_err(|e| e.into());

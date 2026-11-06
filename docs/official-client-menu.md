@@ -73,7 +73,7 @@ GameViewerService.exe（SYSTEM 服务，登录前控制）、GameViewerHealthd.e
 |---|---|---|---|
 | 设备分组 / 备注 | `/api/v1/device/groups/of/my`、`RenameSessionReq/Resp` | ⬜ | 云端 API，host 侧无关 |
 | 开机唤醒（WOL） | `/api/v1/device/wake_on_lan/info` + push（UU_WOL_HELPER） | ✅（实验） | |
-| 应用列表/启动（remote_app_list 4.18+） | `LaunchApp`、`ShowApp`、`QuickLaunchScan*`、`/api/v1/app/list/of/device` | ⬜ | 扫 .desktop → 云端上报 → 点图标即串流该应用窗口 |
+| 应用列表/启动（remote_app_list 4.18+） | RPC 23 `QuickLaunchScanRequest{}`（空）→ 响应 19 `{1 error_code, 2 error_message, 3 repeated QuickLaunchAppItem{1 app_key, 2 name, 3 icon_url, 4 target_path, 5 app_id}}`；RPC 24 `{1 app_key}` → 20 `{…, 3 app_key, 4 bytes icon}`；启动 = Message 4 `LaunchApp{1 dapp_id, 2 name, 3 target_path, 4 args, 5 app_key}`（与 SimpleAction=3 同级、无应答）；唤起 = Message 5 `ShowApp` | 🆕 | `src/app_list.rs`：扫标准 .desktop 目录（~/.local、/usr、flatpak、snap，前者优先去重，上限 512，本地化 Name[lang]），图标走 freedesktop hicolor 查找（PNG 优先→SVG→pixmaps），icon_url 留空不上云。target_path = 去 field code 的完整 Exec 行，LaunchApp 原样回传后 shlex 拆分、可执行文件须在 PATH/绝对路径存在；`systemd-run --user --scope` 启动（宿主重启后应用存活，实测 foot 开窗）失败回退直接 spawn。ShowApp 按 StartupWMClass `hyprctl dispatch focuswindow class:^X$`（尽力而为）。`app-list-probe [app_key]` / `--launch <app_key>` 诊断 |
 
 ## 架构级（非菜单项，记录差距）
 

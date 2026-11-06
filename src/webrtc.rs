@@ -737,6 +737,21 @@ impl WebRtcSession {
                                 (21, WireValue::Bytes(rpc)) => Some(*rpc), _ => None,
                             }) else { continue; };
                             let Ok(rpc_fields) = crate::protocol::decode_wire(rpc) else { continue; };
+                            // 应用列表/快速启动: official RpcRequest 23 QuickLaunchScan (empty)
+                            // → response 19 with the app list; 24 QuickLaunchAppIcon
+                            // {1 app_key} → 20 {1 error_code, 2 error_message, 3 app_key,
+                            // 4 bytes icon}. No cloud upload: the list rides in the response.
+                            if desktop && crate::app_list::wants(&rpc_fields) {
+                                let bytes = rpc.to_vec();
+                                let handled = tokio::task::spawn_blocking(move || crate::app_list::handle_rpc(&bytes))
+                                    .await.ok().flatten();
+                                if let Some((_case, body)) = handled {
+                                    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                                    let _ = response_tx.send(crate::initialization::envelope(
+                                        sequence.fetch_add(1, std::sync::atomic::Ordering::Relaxed), ts, 22, &body));
+                                } else { reject("App list handling failed"); }
+                                continue;
+                            }
                             // 屏幕旋转: official RpcRequest case 22 SendFlipScreenRequest {1
                             // screen_orientation} → response 18 {1 error_code}. Rotating the
                             // streamed output changes its size under the encoder: bump the source
@@ -1402,6 +1417,22 @@ impl WebRtcSession {
                                 let seq = fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Varint(v), 1) => Some(*v), _ => None });
                                 let _timestamp = fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Varint(v), 2) => Some(*v), _ => None });
                                 let simple = fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Bytes(v), 3) => Some(*v), _ => None });
+                                // 应用列表启动: Message 4 LaunchApp / 5 ShowApp share SimpleAction's
+                                // envelope (official gv_pb.Message cases 4/5); fire-and-forget, no reply.
+                                for case in [4u32, 5u32] {
+                                    if let Some(payload) = fields.iter().find_map(|f| match (&f.value, f.number) { (WireValue::Bytes(v), n) if n == case => Some(v.to_vec()), _ => None }) {
+                                        let app = case == 4;
+                                        tokio::spawn(async move {
+                                            let result = tokio::task::spawn_blocking(move || crate::app_list::handle_message(case, &payload))
+                                                .await.ok().flatten();
+                                            match result {
+                                                Some(Ok(())) => {}
+                                                Some(Err(error)) => log::warn!("App {} rejected: {error}", if app { "launch" } else { "show" }),
+                                                None => log::warn!("App {} undecodable", if app { "launch" } else { "show" }),
+                                            }
+                                        });
+                                    }
+                                }
                                 // Diagnostics: which non-input CONTROL messages the viewer sends (numbers only, no contents).
                                 if !fields.iter().any(|f| f.number == 20) {
                                     static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
