@@ -1,0 +1,62 @@
+name: Omarchy
+
+# The omarchy branch: build/test the fork's feature set on Arch (the distro Omarchy ships),
+# and publish a binary release from `omarchy-v*` tags. Upstream's `v*` release workflow is
+# left untouched (never push plain v* tags here: its docker job pushes to upstream's ghcr).
+on:
+  push:
+    branches: [omarchy]
+    tags: ['omarchy-v*']
+  pull_request:
+    branches: [omarchy]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm git rust pkgconf shellcheck \
+            libx11 libxext libxtst libxfixes wayland libxkbcommon gtk4 \
+            libpulse opus libva mesa libxcb ffmpeg
+      - uses: actions/checkout@v4
+      - name: Shellcheck the omarchy installer
+        run: shellcheck packaging/omarchy/install.sh
+      - run: cargo test --locked
+      - run: cargo test --locked --features wayland,nsh-ui
+      # The feature set this fork deploys (see README: Omarchy 支持 / Omarchy support).
+      - run: cargo build --release --locked --features wayland,inproc-av,nsh-ui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uuremote-server-omarchy-x86_64
+          path: target/release/uuremote-server
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/omarchy-v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: uuremote-server-omarchy-x86_64
+          path: dist
+      - name: Package
+        run: |
+          # Fixed asset name: the installer's "latest release" URL depends on it being stable.
+          name=uuremote-omarchy-x86_64
+          mkdir -p "$name"
+          cp dist/uuremote-server packaging/omarchy/install.sh LICENSE README.md README.en.md config.example.json "$name/"
+          cp -r contrib "$name/"
+          tar czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: docs/release-notes/${{ github.ref_name }}.md
+          files: |
+            uuremote-omarchy-x86_64.tar.gz
+            uuremote-omarchy-x86_64.tar.gz.sha256
