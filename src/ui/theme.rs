@@ -3,9 +3,15 @@
 //! so this window reads the palette itself and maps it onto nsh's shadcn tokens. One palette
 //! serves both appearances (an Omarchy theme already matches its own `mode`); tokens left out
 //! keep nsh's defaults. Colors are precomputed hex (no `var()`/`color-mix()` in the output).
+//! `watch_live` re-applies the palette when Omarchy switches themes (`omarchy theme set`
+//! rewrites the materialized files and bumps `theme.generation`), the way native apps follow
+//! the system theme — nsh re-resolves token classes at once, so no window rebuild.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
+
+use nsh_platform_linux as platform;
 
 /// cssVars JSON for `AppView::set_theme_overrides`, or `None` without an Omarchy theme
 /// (nsh's default neutral theme then draws the window).
@@ -17,6 +23,35 @@ fn colors_toml() -> Option<PathBuf> {
     let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))?;
     Some(state.join("omarchy").join("current").join("theme").join("colors.toml"))
+}
+
+/// Cheap change signature: the `omarchy theme set` generation counter plus the palette's
+/// mtime (covers manual palette edits); `None` when no Omarchy state exists.
+fn theme_signature() -> Option<(Option<String>, Option<std::time::SystemTime>)> {
+    let colors = colors_toml()?;
+    // theme.generation sits beside the theme directory: <state>/omarchy/current/theme.generation.
+    let generation = std::fs::read_to_string(colors.parent()?.parent()?.join("theme.generation")).ok();
+    let mtime = std::fs::metadata(&colors).ok().and_then(|m| m.modified().ok());
+    Some((generation, mtime))
+}
+
+/// Re-applies the Omarchy palette whenever it changes, on the UI thread's main loop.
+/// Installed once after the initial palette; polling a stat is free at this rate.
+pub fn watch_live(view: Rc<platform::AppView>) {
+    let mut last = theme_signature();
+    platform::gtk4::glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
+        let signature = theme_signature();
+        if signature == last { return platform::gtk4::glib::ControlFlow::Continue; }
+        last = signature;
+        match omarchy_overrides() {
+            Some(json) => if let Err(error) = view.set_theme_overrides(Some(&json)) {
+                log::warn!("Omarchy theme update rejected: {error}");
+            },
+            // The palette vanished (no Omarchy state): hand the app its own theme back.
+            None => { let _ = view.set_theme_overrides(None); }
+        }
+        platform::gtk4::glib::ControlFlow::Continue
+    });
 }
 
 /// `key = "#rrggbb"` lines → a key→hex map; anything else is skipped.

@@ -175,6 +175,9 @@ fn build_window(hidden: bool, ready: mpsc::Sender<bool>) -> bool {
                 log::warn!("Omarchy theme overrides rejected: {error}");
             }
         }
+        // Follow `omarchy theme set` live, like the desktop's native apps (1s stat poll on
+        // this thread's main loop; nsh re-resolves token classes at once).
+        theme::watch_live((*view).clone());  // view is Rc<Rc<AppView>>: clone the inner Rc.
         view.load(App::Rust(Root::of::<app::HostApp>()));
         window.set_child(Some(&view.widget()));
         tray::start();
