@@ -65,10 +65,11 @@ if [ -n "$missing" ] && [ "$ffmpeg_install" = 1 ]; then
     printf 'Missing runtime packages: %s. Install them with sudo pacman? [Y/n] ' "$missing"
     read -r ask || ask=y
   fi
+  # The disable sits in front of the whole case (directives cannot annotate branches);
+  # the only unquoted expansion inside is $missing, split into package names on purpose.
+  # shellcheck disable=SC2086
   case $ask in
     n*|N*) echo "Skipped ($missing); desktop video and the device list's connect button need them." ;;
-    # Unquoted on purpose: $missing holds space-separated package names.
-    # shellcheck disable=SC2086
     *) sudo pacman -S --needed --noconfirm $missing ;;
   esac
 fi
