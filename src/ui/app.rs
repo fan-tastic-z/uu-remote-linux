@@ -30,15 +30,20 @@ pub fn HostApp() -> impl IntoElement {
         .flex_1()
         .bg(move || theme().background)
         .child(
-            view()
+            // The card column scrolls when the window is shorter than the cards
+            // (tiled or small): a plain flex_1 view clips its tail instead.
+            scroll()
                 .flex_1()
-                .p_3()
-                .gap_3()
-                .child(problem_banner())
-                .child(when(move || state::Sections::get().assist, device_card))
-                .child(when(move || state::Sections::get().account, account_card))
-                .child(when(move || state::Sections::get().settings, settings_card))
-                .child(footer()),
+                .child(
+                    view()
+                        .p_3()
+                        .gap_3()
+                        .child(problem_banner())
+                        .child(when(move || state::Sections::get().assist, device_card))
+                        .child(when(move || state::Sections::get().account, account_card))
+                        .child(when(move || state::Sections::get().settings, settings_card))
+                        .child(footer()),
+                ),
         )
 }
 
