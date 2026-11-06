@@ -189,7 +189,9 @@ pub(crate) fn start() {
             "AttentionIconName" | "OverlayIconName" => "".to_variant(),
             "ToolTip" => tooltip.clone(),
             "ItemIsMenu" => false.to_variant(),
-            "Menu" => MENU_PATH.to_variant(),
+            // An object path on the wire ("o"), not a string — hosts demarshal into
+            // QDBusObjectPath and drop the menu (right-click does nothing) otherwise.
+            "Menu" => glib::variant::ObjectPath::try_from(MENU_PATH).expect("valid object path").to_variant(),
             "WindowId" => 0i32.to_variant(),
             _ => "".to_variant(),
         }
