@@ -2,6 +2,49 @@
 
 **简体中文** | [English](README.en.md)
 
+## Omarchy 支持（本 fork 的 `omarchy` 分支）
+
+本仓库是 [fan-tastic-z](https://github.com/fan-tastic-z) 维护的 fork，[`omarchy` 分支](https://github.com/fan-tastic-z/uu-remote-linux/tree/omarchy)
+面向 [Omarchy](https://omarchy.org)（Arch Linux + Hyprland）做了定制；上游是
+[VallisterDev/uu-remote-linux](https://github.com/VallisterDev/uu-remote-linux)（即本 README 其余部分），
+fork 通过持续合并跟进上游的协议修复。本节只讲 fork 的增量。
+
+### 一键安装（Arch / Omarchy / Hyprland）
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fan-tastic-z/uu-remote-linux/omarchy/packaging/omarchy/install.sh | bash
+```
+
+自动下载[最新构建](https://github.com/fan-tastic-z/uu-remote-linux/releases)并安装 `~/.local/bin/uuremote-server`、
+桌面启动器图标和 systemd 用户服务 `uuremote-native.service`（缺 ffmpeg 时会用 sudo pacman 补装）。
+装完在 Hyprland 会话里运行 `uuremote-server login` 扫码登录即可。
+预编译二进制在 Arch 滚动更新上构建，只支持 Arch 系发行版；GNOME/KDE/X11 请用上游版本。
+
+### 相对上游的增量
+
+| 方向 | 内容 |
+|---|---|
+| 主窗口 | `nsh-ui` feature：nsh/GTK4 原生窗口替换 GTK3 C 窗口，实时跟随 Omarchy 主题换色（含 GTK 窗框）、卡片滚动、系统托盘（quickshell）图标 + 右键菜单（打开主窗口 / 退出）、应用启动器入口与「显示窗口」子命令 |
+| Hyprland 集成 | 虚拟显示器（headless output，`hyprctl eval`）、屏幕旋转（RPC 22）、应用列表（RPC 23/24，systemd-run 启动）、144fps 档 |
+| 视频编码 | `--features inproc-av` 进程内 NVENC/VAAPI；CPU 编码器只接受 ≤1080p 的 H.265 请求；VAAPI 硬件转换显著降 CPU |
+| 稳定性 | 扫码登录长轮询超时自动重试，二维码不再假性「已失效」 |
+
+nsh 钉在 [Cargo.toml](Cargo.toml) 里验证过的 git rev 上；GTK3 窗口保留为去掉 `nsh-ui` 时的回退构建。
+
+### 从源码构建
+
+```sh
+sudo pacman -S --needed base-devel rust pkgconf libx11 libxext libxtst libxfixes \
+  wayland libxkbcommon gtk4 libpulse opus libva mesa libxcb ffmpeg
+cargo test --locked --features wayland,nsh-ui
+cargo build --release --features wayland,inproc-av,nsh-ui
+```
+
+CI 在 `omarchy` 分支推送时于 Arch 容器内构建测试，`omarchy-v*` 标签发布 release（见
+[.github/workflows/omarchy.yml](.github/workflows/omarchy.yml)）。
+
+---
+
 > **写在前面**
 >
 > 网易 UU 远程非常好用，但官网一直没有 Linux 版本。于是我借助 Claude 和 Codex，写了这个开源的 Linux 被控端：

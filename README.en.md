@@ -2,6 +2,52 @@
 
 [简体中文](README.md) | **English**
 
+## Omarchy support (this fork's `omarchy` branch)
+
+This repository is a fork maintained by [fan-tastic-z](https://github.com/fan-tastic-z); the
+[`omarchy` branch](https://github.com/fan-tastic-z/uu-remote-linux/tree/omarchy) customizes the host for
+[Omarchy](https://omarchy.org) (Arch Linux + Hyprland). Upstream is
+[VallisterDev/uu-remote-linux](https://github.com/VallisterDev/uu-remote-linux) (the rest of this README);
+the fork follows its protocol fixes through regular merges. This section covers the fork's additions only.
+
+### One-line install (Arch / Omarchy / Hyprland)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fan-tastic-z/uu-remote-linux/omarchy/packaging/omarchy/install.sh | bash
+```
+
+Downloads the [latest build](https://github.com/fan-tastic-z/uu-remote-linux/releases) and installs
+`~/.local/bin/uuremote-server`, the launcher icon, and the `uuremote-native.service` systemd user unit
+(it installs ffmpeg via sudo pacman when missing). Afterwards run `uuremote-server login` inside your
+Hyprland session and scan the QR code. The prebuilt binary targets Arch rolling releases only;
+for GNOME/KDE/X11 use the upstream release.
+
+### Additions over upstream
+
+| Area | What it adds |
+|---|---|
+| Main window | `nsh-ui` feature: an nsh/GTK4 native window replaces the GTK3 C window, follows the Omarchy theme live (GTK chrome included), scrolls its card column, and brings a quickshell tray icon with a right-click menu (open window / quit) plus a launcher entry and a `show` subcommand |
+| Hyprland | virtual display (headless output via `hyprctl eval`), screen rotation (RPC 22), app list (RPC 23/24, launched through systemd-run), a 144 fps preset |
+| Video encoding | `--features inproc-av` in-process NVENC/VAAPI; CPU encoders only accept H.265 requests up to 1080p; VAAPI hardware conversion cuts CPU sharply |
+| Stability | the QR-login status long poll retries on client timeout instead of faking an expired code |
+
+nsh is pinned to the git rev validated in [Cargo.toml](Cargo.toml); the GTK3 window stays as the fallback
+build without `nsh-ui`.
+
+### Building from source
+
+```sh
+sudo pacman -S --needed base-devel rust pkgconf libx11 libxext libxtst libxfixes \
+  wayland libxkbcommon gtk4 libpulse opus libva mesa libxcb ffmpeg
+cargo test --locked --features wayland,nsh-ui
+cargo build --release --features wayland,inproc-av,nsh-ui
+```
+
+CI builds and tests the branch in an Arch container on every push to `omarchy`; `omarchy-v*` tags publish
+a release (see [.github/workflows/omarchy.yml](.github/workflows/omarchy.yml)).
+
+---
+
 > **A note first**
 >
 > NetEase UU Remote (网易 UU 远程) is a great remote-desktop tool, but there is no Linux version on its
