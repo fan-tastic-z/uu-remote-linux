@@ -135,15 +135,16 @@ fn qr_data<'a>(stage: &str, status: u16, body: &'a Value) -> Result<&'a Value, S
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum QrPollAction { Wait(i64), Scanned, Confirmed, Refresh(Duration), Failed(&'static str) }
+enum QrPollAction { Wait(i64), Scanned, Confirmed, Refresh(Duration), Failed(&'static str, bool) }
 
 /// Preserve the official refresh policy; a failed query says nothing about QR expiry.
 fn qr_poll_action(last_status: i64, http_status: u16, body: &Value) -> QrPollAction {
     if body.get("code").and_then(Value::as_i64) == Some(QR_EXPIRED) {
-        return QrPollAction::Failed(crate::i18n::s("二维码已失效","QR code expired"));
+        // The second field: the code is definitely dead, not merely possibly-stale.
+        return QrPollAction::Failed(crate::i18n::s("二维码已失效","QR code expired"), true);
     }
     let Ok(data) = qr_data("qrcode status", http_status, body) else {
-        return QrPollAction::Failed(crate::i18n::s("二维码状态查询失败","QR status check failed"));
+        return QrPollAction::Failed(crate::i18n::s("二维码状态查询失败","QR status check failed"), false);
     };
     match data.get("status").and_then(Value::as_i64) {
         Some(1) => QrPollAction::Wait(1),
@@ -152,7 +153,7 @@ fn qr_poll_action(last_status: i64, http_status: u16, body: &Value) -> QrPollAct
         Some(0) => QrPollAction::Refresh(Duration::from_millis(350)),
         Some(3) => QrPollAction::Refresh(Duration::ZERO),
         Some(4) => QrPollAction::Confirmed,
-        _ => QrPollAction::Failed(crate::i18n::s("二维码状态响应异常","Unexpected QR status response")),
+        _ => QrPollAction::Failed(crate::i18n::s("二维码状态响应异常","Unexpected QR status response"), false),
     }
 }
 
@@ -328,14 +329,14 @@ pub(crate) async fn flow(ui: &LoginUi) -> Result<String, String> {
             Ok(r) => r,
             Err(e) if e.response_received() => {
                 eprintln!("QR generation response failed: {e}");
-                wait_for_refresh(ui, crate::i18n::s("二维码加载失败","QR code failed to load")).await;
+                wait_for_refresh(ui, crate::i18n::s("二维码加载失败","QR code failed to load"), false).await;
                 continue;
             }
             Err(e) => return Err(format!("QR generation failed: {e}")),
         };
         let d = match qr_data("qrcode gen", status, &resp) {
             Ok(d) => d.clone(),
-            Err(e) => { println!("QR code could not be loaded ({e})"); wait_for_refresh(ui, crate::i18n::s("二维码加载失败","QR code failed to load")).await; continue; }
+            Err(e) => { println!("QR code could not be loaded ({e})"); wait_for_refresh(ui, crate::i18n::s("二维码加载失败","QR code failed to load"), false).await; continue; }
         };
         let url = d.get("qrcode_jump_url").and_then(|v| v.as_str()).ok_or("qrcode gen returned no qrcode_jump_url")?.to_string();
         let ticket = qr_ticket(&d).ok_or("qrcode gen returned no status ticket")?.to_string();
@@ -355,16 +356,22 @@ pub(crate) async fn flow(ui: &LoginUi) -> Result<String, String> {
         }
         if !ui.quiet() { println!("\nScan with the UU Remote mobile app (网易UU远程 App 扫码登录):\n{}", render_qr(&url)?); }
         let mut login_status = 1i64;
+        let mut timed_out = false;
         let failure = loop {
             let query = json!({"token": ticket, "qrcode_jump_url": url, "login_status": login_status});
             let (status, resp) = match client.post_with_timeout("/api/v1/qrcode/login/status", Some(&query), timeout).await {
                 Ok(r) => r,
+                // This cloud holds the long poll open past the 60 s request timeout while
+                // nothing changes; a client-side timeout is normal waiting, not a failure.
+                // Parking here stopped the poll, the QR expired unseen at ~5 min, and the
+                // window kept offering the dead code (scanned as 已失效). Re-ask instead.
+                Err(e) if e.kind == QrRequestErrorKind::Timeout => {
+                    if !timed_out { eprintln!("QR status long-poll idle timeout; re-asking while waiting (not an expiry)"); timed_out = true; }
+                    continue;
+                }
                 Err(e) => {
                     eprintln!("QR status query failed: {e}; last_status={login_status}");
-                    break match e.kind {
-                        QrRequestErrorKind::Timeout => crate::i18n::s("二维码状态查询超时（不代表二维码已失效）","QR status check timed out (the QR code may still be valid)"),
-                        _ => crate::i18n::s("二维码状态查询失败（不代表二维码已失效）","QR status check failed (the QR code may still be valid)"),
-                    };
+                    break (crate::i18n::s("二维码状态查询失败（不代表二维码已失效）","QR status check failed (the QR code may still be valid)"), false);
                 }
             };
             match qr_poll_action(login_status, status, &resp) {
@@ -380,7 +387,7 @@ pub(crate) async fn flow(ui: &LoginUi) -> Result<String, String> {
                 QrPollAction::Refresh(delay) => {
                     if delay.is_zero() { println!("QR code expired; generating a new one"); }
                     else { tokio::time::sleep(delay).await; }
-                    break "";
+                    break ("", false);
                 }
                 QrPollAction::Confirmed => {
                     println!("已确认，正在完成登录 (confirmed, completing login)");
@@ -390,13 +397,13 @@ pub(crate) async fn flow(ui: &LoginUi) -> Result<String, String> {
                         Ok(r) => r,
                         Err(e) if e.response_received() => {
                             eprintln!("QR login exchange response failed: {e}");
-                            break crate::i18n::s("登录失败","Sign-in failed");
+                            break (crate::i18n::s("登录失败","Sign-in failed"), false);
                         }
                         Err(e) => return Err(format!("QR login exchange failed: {e}")),
                     };
                     let d = match qr_data("qrcode login", status, &resp) {
                         Ok(d) => d,
-                        Err(e) => { println!("QR login not granted ({e})"); break crate::i18n::s("登录失败","Sign-in failed"); }
+                        Err(e) => { println!("QR login not granted ({e})"); break (crate::i18n::s("登录失败","Sign-in failed"), false); }
                     };
                     let token = d.get("token").and_then(|v| v.as_str()).ok_or("login returned no token")?;
                     let user = d.get("user_id").and_then(|v| v.as_str()).ok_or("login returned no user_id")?;
@@ -413,14 +420,14 @@ pub(crate) async fn flow(ui: &LoginUi) -> Result<String, String> {
                     println!("Logged in as {} ({}); saved to {}", nickname, user, path.display());
                     return Ok(if nickname.is_empty() { user.to_string() } else { nickname.to_string() });
                 }
-                QrPollAction::Failed(reason) => {
+                QrPollAction::Failed(reason, expired) => {
                     eprintln!("QR status query stopped: http_status={status} api_code={:?} status={:?} last_status={login_status}",
                         resp.get("code").and_then(Value::as_i64), resp.get("data").and_then(|d| d.get("status")).and_then(Value::as_i64));
-                    break reason;
+                    break (reason, expired);
                 }
             }
         };
-        if !failure.is_empty() { wait_for_refresh(ui, failure).await; }
+        if !failure.0.is_empty() { wait_for_refresh(ui, failure.0, failure.1).await; }
     }
 }
 
@@ -431,8 +438,10 @@ fn qr_ticket(gen: &Value) -> Option<&str> {
 }
 
 /// Stop like the official client and wait for the user: the 刷新二维码 button, Enter in a terminal,
-/// or (no window and no terminal, e.g. a service) one minute.
-async fn wait_for_refresh(ui: &LoginUi, reason: &str) {
+/// or (no window and no terminal, e.g. a service) one minute. A definitely-expired QR (`expired`)
+/// also moves on after a minute with the window up: a dead code on screen only invites a scan that
+/// the app will reject.
+async fn wait_for_refresh(ui: &LoginUi, reason: &str, expired: bool) {
     use std::io::IsTerminal;
     ui.status(&crate::tr!("{reason}，请点击「刷新二维码」","{reason}. Click \"Refresh QR code\"."), Tone::Error);
     ui.offer_refresh(true);
@@ -444,7 +453,7 @@ async fn wait_for_refresh(ui: &LoginUi, reason: &str) {
     loop {
         if ui.take_refresh() || (ui.shown() && ui.closed()) { break; }
         if let Some(handle) = line.as_mut() { if handle.is_finished() { break; } }
-        if !ui.shown() && !terminal && started.elapsed() >= Duration::from_secs(60) { break; }
+        if (expired || !ui.shown()) && !terminal && started.elapsed() >= Duration::from_secs(60) { break; }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     ui.offer_refresh(false);
@@ -462,18 +471,18 @@ mod tests {
         assert_eq!(qr_poll_action(2, 200, &reply(4)), QrPollAction::Confirmed);
         assert_eq!(qr_poll_action(1, 200, &reply(0)), QrPollAction::Refresh(Duration::from_millis(350)));
         assert_eq!(qr_poll_action(2, 200, &reply(3)), QrPollAction::Refresh(Duration::ZERO));
-        assert_eq!(qr_poll_action(2, 400, &json!({"code": 1190})), QrPollAction::Failed(crate::i18n::s("二维码已失效","QR code expired")));
+        assert_eq!(qr_poll_action(2, 400, &json!({"code": 1190})), QrPollAction::Failed(crate::i18n::s("二维码已失效","QR code expired"), true));
     }
 
     #[test]
     fn qr_poll_failures_do_not_imply_expiry_or_confirmation() {
         for last in [1, 2] {
             for body in [json!(null), json!({"code": 1}), json!({"code": 0, "data": {"status": 4}})] {
-                assert_eq!(qr_poll_action(last, 503, &body), QrPollAction::Failed(crate::i18n::s("二维码状态查询失败","QR status check failed")));
+                assert_eq!(qr_poll_action(last, 503, &body), QrPollAction::Failed(crate::i18n::s("二维码状态查询失败","QR status check failed"), false));
             }
-            assert_eq!(qr_poll_action(last, 200, &json!({"code": 1})), QrPollAction::Failed(crate::i18n::s("二维码状态查询失败","QR status check failed")));
+            assert_eq!(qr_poll_action(last, 200, &json!({"code": 1})), QrPollAction::Failed(crate::i18n::s("二维码状态查询失败","QR status check failed"), false));
             for data in [json!(null), json!({}), json!({"status": "4"}), json!({"status": 99}), json!({"status": -1})] {
-                assert_eq!(qr_poll_action(last, 200, &json!({"code": 0, "data": data})), QrPollAction::Failed(crate::i18n::s("二维码状态响应异常","Unexpected QR status response")));
+                assert_eq!(qr_poll_action(last, 200, &json!({"code": 0, "data": data})), QrPollAction::Failed(crate::i18n::s("二维码状态响应异常","Unexpected QR status response"), false));
             }
         }
     }
