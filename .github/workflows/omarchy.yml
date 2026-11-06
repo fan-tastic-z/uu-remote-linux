@@ -22,18 +22,27 @@ jobs:
         run: |
           pacman -Syu --noconfirm git rust pkgconf shellcheck \
             libx11 libxext libxtst libxfixes wayland libxkbcommon gtk4 \
-            libpulse opus libva mesa libxcb ffmpeg
+            libpulse opus libva mesa libxcb ffmpeg \
+            gtk3 sdl2
       - uses: actions/checkout@v4
       - name: Shellcheck the omarchy installer
         run: shellcheck packaging/omarchy/install.sh
       - run: cargo test --locked
       - run: cargo test --locked --features wayland,nsh-ui
+      # The deploy feature set (server bin; the viewer bin's websocket tests are
+      # timing-sensitive under parallel load and are covered by its build below).
+      - run: cargo test --locked --features wayland,nsh-ui,native-viewer --bin uuremote-server
       # The feature set this fork deploys (see README: Omarchy 支持 / Omarchy support).
-      - run: cargo build --release --locked --features wayland,inproc-av,nsh-ui
+      - run: cargo build --release --locked --features wayland,inproc-av,nsh-ui,native-viewer --bin uuremote-server
+      # The controller binary (我的设备 sessions): a separate invocation keeps its GTK3 tool
+      # windows out of the nsh/GTK4 server build (the two GTKs cannot share a process).
+      - run: cargo build --release --locked --features native-viewer,viewer-sdl --bin uuremote-viewer
       - uses: actions/upload-artifact@v4
         with:
           name: uuremote-server-omarchy-x86_64
-          path: target/release/uuremote-server
+          path: |
+            target/release/uuremote-server
+            target/release/uuremote-viewer
 
   release:
     if: startsWith(github.ref, 'refs/tags/omarchy-v')
@@ -50,7 +59,7 @@ jobs:
           # Fixed asset name: the installer's "latest release" URL depends on it being stable.
           name=uuremote-omarchy-x86_64
           mkdir -p "$name"
-          cp dist/uuremote-server packaging/omarchy/install.sh LICENSE README.md README.en.md config.example.json "$name/"
+          cp dist/uuremote-server dist/uuremote-viewer packaging/omarchy/install.sh LICENSE README.md README.en.md config.example.json "$name/"
           cp -r contrib "$name/"
           tar czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"

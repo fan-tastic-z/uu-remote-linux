@@ -4,8 +4,8 @@
 #   ./install.sh                from the release tarball (uuremote-server sits next to this script)
 #   curl -fsSL <repo>/install.sh | bash    downloads the latest release first, then installs
 # usage: install.sh [--yes] [--no-ffmpeg] [--no-service]
-#   --yes         install missing runtime packages (ffmpeg) through sudo pacman without asking
-#   --no-ffmpeg   only check ffmpeg, never install it
+#   --yes         install missing runtime packages (ffmpeg, sdl2) through sudo pacman without asking
+#   --no-ffmpeg   only check runtime packages, never install them
 #   --no-service  install files but do not enable/start the systemd user unit
 set -eu
 
@@ -53,17 +53,21 @@ if [ -z "${WAYLAND_DISPLAY:-}" ]; then
   echo "Note: no Wayland session detected. This build targets Omarchy (Arch + Hyprland); for GNOME/KDE/X11 use the upstream release instead." >&2
 fi
 
-# Runtime package check: FFmpeg drives desktop video (missing = 黑屏/正在传输画面); the rest
-# (libva, mesa, libpulse) ships with any desktop install. wl-clipboard only mirrors the clipboard.
-if ! command -v ffmpeg >/dev/null && [ "$ffmpeg_install" = 1 ]; then
+# Runtime package check: FFmpeg drives desktop video (missing = 黑屏/正在传输画面) and SDL2
+# the 我的设备 controller window; the rest (libva, mesa, libpulse) ships with any desktop.
+# wl-clipboard only mirrors the clipboard.
+missing=
+command -v ffmpeg >/dev/null || missing="ffmpeg"
+pacman -Q sdl2 >/dev/null 2>&1 || missing="${missing:+$missing }sdl2"
+if [ -n "$missing" ] && [ "$ffmpeg_install" = 1 ]; then
   if [ "$assume_yes" = 1 ]; then ask=y
   else
-    printf 'ffmpeg is missing (desktop video needs it). Install it with sudo pacman? [Y/n] '
+    printf 'Missing runtime packages: %s. Install them with sudo pacman? [Y/n] ' "$missing"
     read -r ask || ask=y
   fi
   case $ask in
-    n*|N*) echo "Skipped ffmpeg; desktop video will not work until it is installed." ;;
-    *) sudo pacman -S --needed --noconfirm ffmpeg ;;
+    n*|N*) echo "Skipped ($missing); desktop video and the device list's connect button need them." ;;
+    *) sudo pacman -S --needed --noconfirm $missing ;;
   esac
 fi
 command -v wl-clipboard >/dev/null || echo "Tip: 'pacman -S wl-clipboard' enables the Wayland clipboard bridge."
@@ -75,6 +79,8 @@ unit_dir=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 put() { install -Dm"$1" "$2" "$3.new" && mv -f "$3.new" "$3"; }
 
 put 755 "$src/uuremote-server" "$bin/uuremote-server"
+# The 我的设备 card spawns it for remote sessions; optional (the host works without).
+[ -f "$src/uuremote-viewer" ] && put 755 "$src/uuremote-viewer" "$bin/uuremote-viewer"
 if [ -d "$src/contrib/desktop" ]; then
   put 644 "$src/contrib/desktop/uu-remote-linux.svg" "$share/icons/hicolor/scalable/apps/uu-remote-linux.svg"
   put 644 "$src/contrib/desktop/uu-remote-linux.desktop" "$share/applications/uu-remote-linux.desktop"
