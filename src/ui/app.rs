@@ -32,8 +32,8 @@ pub fn HostApp() -> impl IntoElement {
         .child(
             view()
                 .flex_1()
-                .p_4()
-                .gap_4()
+                .p_3()
+                .gap_3()
                 .child(problem_banner())
                 .child(when(move || state::Sections::get().assist, device_card))
                 .child(when(move || state::Sections::get().account, account_card))

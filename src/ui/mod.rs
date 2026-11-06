@@ -43,6 +43,36 @@ thread_local! {
     static APP: RefCell<Option<platform::gtk4::Application>> = const { RefCell::new(None) };
     /// The GTK window, on the UI thread only.
     static WINDOW: RefCell<Option<platform::gtk4::ApplicationWindow>> = const { RefCell::new(None) };
+    /// The palette CSS provider for the GTK chrome, installed once and reloaded on
+    /// theme changes (`theme::watch_live` → [`chrome_reload`]).
+    static CHROME: RefCell<Option<platform::gtk4::CssProvider>> = const { RefCell::new(None) };
+}
+
+/// Applies the active Omarchy palette to the GTK chrome (window background, titlebar);
+/// GTK draws its own default theme there, which never matches the themed nsh content.
+/// An empty palette (`None`) clears the CSS back to GTK's defaults.
+pub(crate) fn chrome_reload() {
+    use platform::gtk4 as gtk;
+    use gtk::prelude::*;
+    let css = theme::chrome_css().unwrap_or_default();
+    WINDOW.with(|cell| {
+        let borrowed = cell.borrow();
+        let Some(window) = borrowed.as_ref() else { return };
+        CHROME.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let provider = slot.get_or_insert_with(|| {
+                let provider = gtk::CssProvider::new();
+                // Applies to every window of this process — exactly the one host window.
+                gtk::style_context_add_provider_for_display(
+                    &gtk::prelude::WidgetExt::display(window),
+                    &provider,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                );
+                provider
+            });
+            provider.load_from_string(&css);
+        });
+    });
 }
 
 /// Runs `f` on the UI thread's main loop; dropped before the window exists or after it closed.
@@ -188,6 +218,7 @@ fn build_window(hidden: bool, ready: mpsc::Sender<bool>) -> bool {
             state::push(state::Command::Stop);
         });
         WINDOW.with(|cell| *cell.borrow_mut() = Some(window.clone()));
+        chrome_reload(); // the initial chrome pass; watch_live only fires on changes
         if !hidden { window.present(); }
         READY.store(true, Ordering::SeqCst);
         let _ = ready.send(true);

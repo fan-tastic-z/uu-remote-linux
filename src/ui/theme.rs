@@ -50,8 +50,33 @@ pub fn watch_live(view: Rc<platform::AppView>) {
             // The palette vanished (no Omarchy state): hand the app its own theme back.
             None => { let _ = view.set_theme_overrides(None); }
         }
+        // The GTK chrome follows the same palette (it would otherwise keep GTK's own
+        // light/dark theme and sit beside, not with, the recolored content).
+        super::chrome_reload();
         platform::gtk4::glib::ControlFlow::Continue
     });
+}
+
+/// CSS for the GTK chrome — the window's own background and titlebar — in the active
+/// palette. GTK draws its default light/dark theme there, which never matches Omarchy,
+/// so without this the frame and the content disagree by a shade on every theme.
+/// `None` without a palette (the caller clears the provider back to GTK's defaults).
+pub(crate) fn chrome_css() -> Option<String> {
+    let colors = parse_colors(&std::fs::read_to_string(colors_toml()?).ok()?);
+    let background = colors.get("background")?;
+    let outline = colors.get("muted").map(String::as_str).unwrap_or(background);
+    let mut css = format!(
+        "window {{ background-color: {background}; }}\n\
+         headerbar {{ background: {background}; border-color: {outline}; box-shadow: none; }}\n"
+    );
+    if let Some(foreground) = colors.get("foreground") {
+        css.push_str(&format!(
+            "headerbar {{ color: {foreground}; }}\n\
+             headerbar button {{ background: transparent; color: {foreground}; border: none; box-shadow: none; }}\n\
+             headerbar button:hover {{ background: {outline}; }}\n"
+        ));
+    }
+    Some(css)
 }
 
 /// `key = "#rrggbb"` lines → a key→hex map; anything else is skipped.
